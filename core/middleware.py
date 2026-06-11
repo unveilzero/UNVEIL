@@ -125,3 +125,20 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "frame-ancestors 'none'"
             )
         return response
+class OASFAuditMiddleware(BaseHTTPMiddleware):
+    """OASF Behavioral Scope Verification — logs all agent actions."""
+    
+    async def dispatch(self, request: Request, call_next) -> Response:
+        import logging
+        import time
+        logger = logging.getLogger("oasf.audit")
+        start = time.time()
+        user = getattr(request.state, "current_user", "unknown")
+        response = await call_next(request)
+        duration = round((time.time() - start) * 1000)
+        logger.info(
+            f"OASF_AUDIT | user={user} | "
+            f"method={request.method} | path={request.url.path} | "
+            f"status={response.status_code} | duration={duration}ms"
+        )
+        return response
