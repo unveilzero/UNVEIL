@@ -1119,6 +1119,16 @@ def setup_chat_routes(
                         _max_rounds = _DEFAULT_ROUNDS
                     _max_rounds = max(1, min(_max_rounds, 200))
 
+                    # 1. Initialize OASF Behavioral Verification
+                    from src.oasf_security import OASFAuditMiddleware
+                    if messages:
+                        oasf_audit = OASFAuditMiddleware()
+                        # Evaluate the last turn configuration against boundaries
+                        verification = oasf_audit.verify_behavioral_scope(messages[-1])
+                        telemetry_markup = oasf_audit.format_telemetry_for_frontend(verification)
+                        
+                        # Instantly push the security telemetry card directly into the async stream
+                        yield f"data: {json.dumps({'delta': telemetry_markup})}\n\n"
                     async for chunk in stream_agent_loop(
                         sess.endpoint_url,
                         sess.model,
