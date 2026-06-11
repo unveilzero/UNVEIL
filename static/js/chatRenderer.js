@@ -851,6 +851,13 @@ export function roleTimestamp(when) {
  * Strip tool invocation blocks from text before rendering.
  */
 export function stripToolBlocks(text) {
+  // 1. Capture the raw execution or security block before it gets stripped
+  const toolMatch = text.match(TOOL_CALL_RE) || text.match(EXEC_FENCE_RE) || text.match(XML_TOOL_CALL_RE);
+  if (toolMatch) {
+    // Cache the latest alignment log globally so our message renderer can draw it
+    window.lastOASFLog = toolMatch[0];
+  }
+
   let cleaned = text.replace(TOOL_CALL_RE, '');
   cleaned = cleaned.replace(EXEC_FENCE_RE, '');
   cleaned = cleaned.replace(DSML_TOOL_RE, '');
@@ -858,9 +865,7 @@ export function stripToolBlocks(text) {
   cleaned = cleaned.replace(XML_TOOL_CALL_RE, '');
   cleaned = cleaned.replace(XML_INVOKE_RE, '');
   cleaned = cleaned.replace(TOOL_NARRATION_RE, '');
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n');
-  return cleaned.trim();
-}
+  }
 
 /**
  * Plain-text payload for the message copy buttons: the reply as the renderer
