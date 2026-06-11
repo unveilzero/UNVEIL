@@ -1983,10 +1983,40 @@ export function displayMetrics(messageElement, metrics) {
  * Add a message to the chat history.
  */
 export function addMessage(role, content, modelName, metadata) {
+  export function addMessage(role, content, modelName, metadata) {
   try {
     hideWelcomeScreen();
     const box = document.getElementById('chat-history');
     if (!box) { console.error('Chat history element not found'); return; }
+
+    // 1. If we captured an OASF execution block, render our clean inline card first
+    if (role === 'assistant' && window.lastOASFLog) {
+      const logContainer = document.createElement('div');
+      logContainer.className = 'agent-execution-card';
+      logContainer.style.cssText = 'background: var(--panel); border: 1px solid var(--border); border-radius: 8px; margin: 12px 0; padding: 12px;';
+      
+      // Clean up the raw log format slightly for display
+      const cleanLogText = window.lastOASFLog
+        .replace(/\[\/?TOOL_CALL\]/gi, '')
+        .trim();
+
+      logContainer.innerHTML = `
+        <div class="execution-header" style="display: flex; align-items: center; justify-content: space-between; cursor: pointer;" onclick="this.nextElementSibling.style.display = this.nextElementSibling.style.display === 'none' ? 'block' : 'none';">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="status-indicator" style="width: 8px; height: 8px; background: var(--color-accent); border-radius: 50%; display: inline-block;"></span>
+            <strong style="color: var(--fg); font-size: 13px; font-family: sans-serif;">OASF Behavioral Scope Verifier</strong>
+          </div>
+          <span class="toggle-icon" style="color: var(--color-muted); font-size: 11px; font-family: sans-serif;">▼ View Telemetry</span>
+        </div>
+        <div class="execution-logs" style="display: none; margin-top: 10px; background: var(--bg); border-radius: 6px; padding: 10px; font-family: monospace; font-size: 12px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; color: var(--fg); border: 1px solid var(--border);">
+${cleanLogText}
+        </div>
+      `;
+      box.appendChild(logContainer);
+      
+      // Clear the cache slot so it doesn't accidentally repeat on the next message
+      window.lastOASFLog = null;
+    }
 
     var esc = uiModule.esc;
     const textRaw = Array.isArray(content) ? markdownModule.renderContent(content) : content;
