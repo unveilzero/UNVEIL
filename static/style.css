@@ -16,56 +16,51 @@
  */
 
 :root {
-  /* Core palette */
-  --bg: #282c34;
-  --fg: #9cdef2;
-  --panel: #111;
-  --border: #355a66;
-  --red: #e06c75;
-  /* Were `var(--green)` / `var(--warn)` — self-referential, so they
-     resolved to invalid and every site fell back to its own literal
-     (or, for sites with no fallback, painted as transparent/inherit).
-     Anchor them to real hex so the token layer actually works. */
-  --green: #50fa7b;
-  --warn: #f0ad4e;
+  /* Core palette — Clean Security Workspace */
+  --bg: #0B0F19;         /* Deep obsidian canvas background */
+  --fg: #F3F4F6;         /* Crisp, high-contrast text for clean readability */
+  --panel: #111827;      /* Smooth slate grey for message cards & sidebar panels */
+  --border: #1F2937;     /* Minimal, non-distracting borders */
+  --red: #EF4444;        /* Crimson - used strictly for active threat alerts/actions */
+  --green: #10B981;      /* Emerald Green - maps straight to verified integrity checks */
+  --warn: #F59E0B;       /* Operational amber alert status */
 
-  /* Syntax highlighting */
-  --hl-bg: #1e2228;
-  --hl-fg: #9cdef2;
-  --hl-keyword: #c678dd;
-  --hl-string: #e5c07b;
-  --hl-comment: #828997;
-  --hl-function: #61afef;
-  --hl-number: #d19a66;
-  --hl-builtin: #56b6c2;
-  --hl-variable: #abb2bf;
-  --hl-params: #a8c0d4;
+  /* Syntax highlighting — Calmed down to avoid workspace clutter */
+  --hl-bg: #0F172A;
+  --hl-fg: #E5E7EB;
+  --hl-keyword: #F43F5E;
+  --hl-string: #10B981;
+  --hl-comment: #6B7280;
+  --hl-function: #3B82F6;
+  --hl-number: #F59E0B;
+  --hl-builtin: #06B6D4;
+  --hl-variable: #D1D5DB;
+  --hl-params: #9CA3AF;
 
-  /* Semantic colors */
-  --color-error: #ff4444;
-  --color-error-light: #ff6666;
-  --color-success: #4caf50;
-  --color-warning: #f0ad4e;
-  --color-danger: #c0392b;
-  --color-recording: #ff3b30;
-  --color-recording-hover: #d63031;
-  --color-muted: #888;
-  --color-muted-alt: #6b7280;
-  --color-accent: #00aaff;
-  --color-agent-active: #00ff00;
-  --color-brand-blue: #3b82f6;
-  --color-blind-orange: #ff9800;
+  /* Semantic colors — Tied directly to your OASF state telemetry */
+  --color-error: var(--red);
+  --color-error-light: #FCA5A5;
+  --color-success: var(--green);
+  --color-warning: var(--warn);
+  --color-danger: #991B1B;
+  --color-recording: var(--red);
+  --color-recording-hover: #DC2626;
+  --color-muted: #6B7280;
+  --color-muted-alt: #4B5563;
+  --color-accent: var(--green);         /* System defaults now glow emerald when secure */
+  --color-agent-active: var(--green);   /* Active agents signal green check states */
+  --color-brand-blue: #2563EB;
+  --color-blind-orange: var(--warn);
   --color-save-green: var(--color-success);
-  --color-link-hover: #66c7ff;
-  --color-subheader: #6b8a94;
+  --color-link-hover: #34D399;
+  --color-subheader: #9CA3AF;
+  
   --select-bg: var(--bg);
   --select-fg: var(--fg);
   --select-option-bg: color-mix(in srgb, var(--panel) 74%, var(--bg));
   --select-option-fg: var(--fg);
   --select-option-active-bg: color-mix(in srgb, var(--accent, var(--red)) 24%, var(--panel));
-  /* Warm accent — used by the Goals/Today UI in Notes. Lives as a token so
-     themes can override without touching the goal CSS. */
-  --accent-warm: #d19a66;
+  --accent-warm: #F59E0B;
 }
 
 :root.light {
