@@ -1,0 +1,56 @@
+/* UNVEIL security layer indicator. Green when cleared, red when blocked. */
+.unveil-shield-btn {
+  display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 3px 9px;
+  font: inherit; font-size: 11px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--unveil-shield, var(--color-muted)); background: transparent;
+  border: 1px solid color-mix(in srgb, var(--unveil-shield, var(--color-muted)) 55%, transparent);
+  border-radius: 999px; cursor: pointer; white-space: nowrap; flex: 0 0 auto;
+}
+.unveil-shield-btn[data-state="cleared"] { --unveil-shield: var(--color-success); }
+.unveil-shield-btn[data-state="blocked"] { --unveil-shield: var(--color-error); }
+.unveil-shield-btn[data-state="observe"] { --unveil-shield: var(--color-warning); }
+.unveil-shield-btn:hover { background: color-mix(in srgb, var(--unveil-shield, var(--color-muted)) 12%, transparent); }
+.unveil-shield-btn:focus-visible { outline: 2px solid var(--unveil-shield, var(--color-accent)); outline-offset: 2px; }
+.unveil-shield-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--unveil-shield, var(--color-muted));
+  box-shadow: 0 0 8px var(--unveil-shield, transparent);
+}
+.unveil-shield-btn[data-state="blocked"] .unveil-shield-dot { animation: unveil-shield-pulse 1.2s ease-in-out infinite; }
+@keyframes unveil-shield-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .unveil-shield-btn .unveil-shield-dot { animation: none; } }
+
+.unveil-shield-panel {
+  position: fixed; z-index: 4000; width: min(320px, calc(100vw - 16px)); max-height: min(70vh, 520px);
+  overflow: auto; padding: 12px 14px; color: var(--fg); background: var(--panel);
+  border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 12px 36px rgba(0, 0, 0, .55);
+  font-size: 12.5px; line-height: 1.45;
+}
+.unveil-shield-panel-title { font-weight: 600; letter-spacing: .06em; text-transform: uppercase; font-size: 11px; }
+.unveil-shield-panel-detail { margin: 4px 0 10px; color: var(--color-muted); overflow-wrap: anywhere; }
+.unveil-shield-facts { display: grid; gap: 3px; padding: 8px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.unveil-shield-fact { display: flex; justify-content: space-between; gap: 12px; }
+.unveil-shield-fact-name { color: var(--color-muted); }
+.unveil-shield-fact-value { font-variant-numeric: tabular-nums; text-align: right; }
+.unveil-shield-list { display: grid; gap: 5px; padding-top: 10px; }
+.unveil-shield-empty { color: var(--color-muted); }
+.unveil-shield-item { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; column-gap: 8px; align-items: center; }
+.unveil-shield-item-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); }
+.unveil-shield-item.is-blocked .unveil-shield-item-dot { background: var(--color-error); }
+.unveil-shield-item-tool { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.unveil-shield-item-time { color: var(--color-muted); font-variant-numeric: tabular-nums; }
+.unveil-shield-item-reason { grid-column: 2 / -1; color: var(--color-error); overflow-wrap: anywhere; font-size: 11.5px; }
+
+/* Phone: a small always-visible state dot, since the sidebar starts closed. */
+.unveil-shield-mini {
+  display: none; position: fixed; z-index: 3000; left: max(12px, env(safe-area-inset-left, 0px));
+  top: calc(env(safe-area-inset-top, 0px) + 12px); width: 32px; height: 32px; padding: 0;
+  align-items: center; justify-content: center; background: transparent; border-radius: 50%; cursor: pointer;
+  border: 1px solid color-mix(in srgb, var(--unveil-shield, var(--color-muted)) 55%, transparent);
+}
+.unveil-shield-mini[data-state="cleared"] { --unveil-shield: var(--color-success); }
+.unveil-shield-mini[data-state="blocked"] { --unveil-shield: var(--color-error); }
+.unveil-shield-mini[data-state="observe"] { --unveil-shield: var(--color-warning); }
+.unveil-shield-mini[data-state="blocked"] .unveil-shield-dot { animation: unveil-shield-pulse 1.2s ease-in-out infinite; }
+.unveil-shield-mini:focus-visible { outline: 2px solid var(--unveil-shield, var(--color-accent)); outline-offset: 2px; }
+@media (max-width: 768px) { .unveil-shield-mini { display: inline-flex; } }
+.sidebar-header .sidebar-brand { margin-left: 6px; }

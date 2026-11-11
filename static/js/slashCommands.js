@@ -10,17 +10,19 @@ window.cancelActiveTour = function cancelActiveTour() {
 };
 
 import Storage from './storage.js';
-import uiModule from './ui.js';
+import uiModule from './ui.js?v=20260916largetoolscroll1';
 import sessionModule from './sessions.js';
 import modelsModule from './models.js';
-import chatRenderer from './chatRenderer.js';
+import chatRenderer from './chatRenderer.js?v=20260914metricssummary1';
 import spinnerModule from './spinner.js';
-import themeModule from './theme.js';
-import documentModule from './document.js';
-import settingsModule from './settings.js';
+import themeModule from './theme.js?v=20260911organsrain1';
+import documentModule from './document.js?v=20260916docctx2';
+import workspaceModule from './workspace.js';
+import settingsModule from './settings.js?v=20260912writingstyle3';
 import cookbookModule from './cookbook.js';
-import { EVAL_PROMPTS } from './compare/index.js';
+import { EVAL_PROMPTS } from './compare/index.js?v=20260909mobilepaneaddscroll1';
 import { PROVIDER_DEVICE_FLOWS, formatDeviceFlowError, runProviderDeviceFlow } from './providerDeviceFlow.js';
+import { getSettings } from './appConfig.js';
 
 // ── Module state ──────────────────────────────────────────────────────
 
@@ -100,6 +102,8 @@ function _setupProviderFromInput(input) {
     xai: 'xai',
     grok: 'xai',
     nvidia: 'nvidia',
+    opencodezen: 'opencode-zen',
+    opencodego: 'opencode-go',
   };
   return SETUP_PROVIDER_URLS[aliases[raw] || raw] || null;
 }
@@ -128,6 +132,8 @@ function _extractSetupProviderCredential(input) {
     ['google', 'gemini'], ['gemini', 'gemini'],
     ['x ai', 'xai'], ['xai', 'xai'], ['grok', 'xai'],
     ['nvidia', 'nvidia'],
+    ['opencode zen', 'opencode-zen'], ['opencode-zen', 'opencode-zen'],
+    ['opencode go', 'opencode-go'], ['opencode-go', 'opencode-go'],
   ];
   for (const [alias, key] of providerAliases) {
     const re = new RegExp('(^|\\s|[,;:])(' + alias.replace(/\s+/g, '\\s+') + ')(?=$|\\s|[,;:])', 'i');
@@ -203,6 +209,8 @@ function _showSetupEndpointChoices() {
         '<pre style="margin:4px 0 0;"><code class="setup-clickable-code" style="cursor:pointer;text-decoration:underline;" title="Click to fill in chat">http://localhost:11434/v1</code></pre>' +
         '<div style="margin-top:4px;">or</div>' +
         '<pre style="margin:2px 0 0;"><code class="setup-clickable-code" style="cursor:pointer;text-decoration:underline;" title="Click to fill in chat">http://llm-host.local:8000/v1</code></pre>' +
+        '<div style="margin-top:4px;">or llama.cpp (llama-server):</div>' +
+        '<pre style="margin:2px 0 0;"><code class="setup-clickable-code" style="cursor:pointer;text-decoration:underline;" title="Click to fill in chat">http://localhost:8080/v1</code></pre>' +
       '</div>' +
       '<div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:color-mix(in srgb,var(--bg) 88%,var(--fg) 12%);">' +
         '<div style="font-weight:700;margin-bottom:6px;">' + SETUP_API_ICON + 'API setup</div>' +
@@ -232,6 +240,12 @@ function _showSetupEndpointChoicesStreamed(options = {}) {
       kind: 'code',
       text: 'http://llm-host.local:8000/v1',
       copyText: 'http://llm-host.local:8000/v1',
+    },
+    { kind: 'p', text: 'or llama.cpp (llama-server):' },
+    {
+      kind: 'code',
+      text: 'http://localhost:8080/v1',
+      copyText: 'http://localhost:8080/v1',
     },
     { kind: 'heading', html: SETUP_API_ICON + 'API setup' },
     { kind: 'p', text: 'Paste provider name then API key (example):' },
@@ -274,8 +288,14 @@ function _setupProviderPrompt() {
 // -----------------------------------------------------------------------
 
 /** Persist a message to the current session (fire-and-forget) */
-function _persistMsg(role, content, metadata) {
-  const sid = sessionModule.getCurrentSessionId();
+async function _persistMsg(role, content, metadata) {
+  let sid = sessionModule.getCurrentSessionId();
+  if (!sid && sessionModule.hasPendingChat?.()) {
+    try {
+      await sessionModule.materializePendingSession?.();
+      sid = sessionModule.getCurrentSessionId();
+    } catch (_) {}
+  }
   if (!sid || !content) return;
   const payload = { role, content };
   if (metadata) payload.metadata = metadata;
@@ -287,12 +307,13 @@ function _persistMsg(role, content, metadata) {
 }
 
 function slashReply(text) {
+  _hideWelcomeScreen();
   const chatBox = document.getElementById('chat-history');
   const div = document.createElement('div');
   div.className = 'msg msg-ai';
   const role = document.createElement('div');
   role.className = 'role';
-  role.textContent = 'Odysseus';
+  role.textContent = 'UNVEIL';
   div.appendChild(role);
   const body = document.createElement('div');
   body.className = 'body';
@@ -338,10 +359,13 @@ function _submitComposedMessage(text) {
   const msgInput = document.getElementById('message');
   const form = document.getElementById('chat-form');
   if (!msgInput || !form) return false;
-  msgInput.value = text;
-  msgInput.dispatchEvent(new Event('input', { bubbles: true }));
-  if (typeof form.requestSubmit === 'function') form.requestSubmit();
-  else form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  // The slash handler and app-level form debounce must both release before
+  // sending the pinned prompt, otherwise the follow-up submit is dropped.
+  setTimeout(() => {
+    msgInput.value = text;
+    msgInput.dispatchEvent(new Event('input', { bubbles: true }));
+    form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+  }, 350);
   return true;
 }
 
@@ -408,7 +432,7 @@ function typewriterReply(text, options = {}) {
     div.className = 'msg msg-ai';
     const role = document.createElement('div');
     role.className = 'role';
-    role.textContent = 'Odysseus';
+    role.textContent = 'UNVEIL';
     div.appendChild(role);
     const body = document.createElement('div');
     body.className = 'body';
@@ -448,7 +472,7 @@ function typewriterBlocksReply(blocks, options = {}) {
     div.className = 'msg msg-ai';
     const role = document.createElement('div');
     role.className = 'role';
-    role.textContent = 'Odysseus';
+    role.textContent = 'UNVEIL';
     div.appendChild(role);
     const body = document.createElement('div');
     body.className = 'body';
@@ -639,7 +663,7 @@ async function connectDetectedSetupEndpoint(detected) {
   spinnerDiv.className = 'msg msg-ai';
   const spinnerRole = document.createElement('div');
   spinnerRole.className = 'role';
-  spinnerRole.textContent = 'Odysseus';
+  spinnerRole.textContent = 'UNVEIL';
   spinnerDiv.appendChild(spinnerRole);
   const spinnerBody = document.createElement('div');
   spinnerBody.className = 'body';
@@ -987,7 +1011,7 @@ async function _cmdSessionNew(args, ctx) {
   if (res.ok) {
     const data = await res.json();
     await sessionModule.loadSessions();
-    await sessionModule.selectSession(data.id);
+    await sessionModule.selectSession(data.id, { showLoading: false });
     _hideWelcomeScreen();
     const shortModel = (model || '').split('/').pop();
     await typewriterReply(`New session — ${shortModel || 'ready'}.`);
@@ -1229,6 +1253,43 @@ async function _cmdToggleDoc(args, ctx) {
   return true;
 }
 
+// Workspace: confine the agent's file/shell tools to a folder. Not a boolean -
+// show / set <path> / clear / pick (open the directory browser).
+async function _cmdWorkspace(args, ctx) {
+  const sub = (args[0] || '').toLowerCase();
+  const rest = args.slice(1).join(' ').trim();
+  const cur = workspaceModule.getWorkspace();
+  if (!sub || sub === 'show' || sub === 'status' || sub === 'info') {
+    slashReply(cur ? `Workspace: <code>${uiModule.esc(cur)}</code>` : 'No workspace set. Configure a backend default or use <code>/workspace &lt;path&gt;</code> / <code>/workspace pick</code>.');
+    return true;
+  }
+  const setWorkspace = (path) => {
+    if (!path) { slashReply('Usage: <code>/workspace &lt;path&gt;</code>'); return true; }
+    // Validate server-side before persisting so the pill never claims a
+    // workspace the backend will refuse to bind (typo, file path, deleted
+    // folder, sensitive dir, filesystem root).
+    workspaceModule.vetAndSetWorkspace(path).then(({ ok, path: resolvedPath }) => {
+      if (ok) slashReply(`Workspace set: <code>${uiModule.esc(resolvedPath)}</code>`);
+      else slashReply(`Not a usable workspace folder on the UNVEIL backend: <code>${uiModule.esc(path)}</code>. If UNVEIL is running in Docker, use the container path, usually <code>/app</code>, or use <code>/workspace pick</code>.`);
+    });
+    return true;
+  };
+  if (sub === 'set' || sub === 'cd' || sub === 'use') {
+    return setWorkspace(rest);
+  }
+  if (sub === 'clear' || sub === 'off' || sub === 'none' || sub === 'unset') {
+    workspaceModule.clearWorkspace();
+    slashReply('Workspace cleared.');
+    return true;
+  }
+  if (sub === 'pick' || sub === 'browse' || sub === 'open') {
+    workspaceModule.openWorkspaceBrowser();
+    return true;
+  }
+  // Match the TUI's short form: /workspace /path (relative paths work too).
+  return setWorkspace(args.join(' ').trim());
+}
+
 async function _cmdToggleShow(args, ctx) {
   const name = (args[0] || '').toLowerCase();
   const val = (args[1] || '').toLowerCase();
@@ -1319,6 +1380,7 @@ async function _cmdOpen(args, ctx) {
       brain: ['tool-memory-btn', 'rail-memory'],
       memory: ['tool-memory-btn', 'rail-memory'],
       memories: ['tool-memory-btn', 'rail-memory'],
+      skills: ['tool-skills-btn', 'rail-skills'],
       research: ['tool-research-btn', 'rail-research'],
       compare: ['tool-compare-btn', 'rail-compare'],
       theme: ['tool-theme-btn', 'rail-theme'],
@@ -1970,12 +2032,12 @@ async function _cmdUsage(args, ctx) {
   const messageCount = Number(session?.message_count || 0);
   const totalTokens = Number(session?.total_tokens || 0);
   const costTracked = chatRenderer.isCostTrackedEndpoint ? chatRenderer.isCostTrackedEndpoint(endpointUrl) : true;
-  const cost = costTracked && chatRenderer.getSessionCost ? Number(chatRenderer.getSessionCost(sid) || 0) : 0;
-  const costLine = costTracked
-    ? (cost > 0
-      ? `Estimated local cost: $${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}`
-      : 'Estimated local cost: unavailable or zero')
-    : 'Estimated local cost: not tracked for this endpoint';
+  const cost = chatRenderer.getSessionCost ? Number(chatRenderer.getSessionCost(sid) || 0) : 0;
+  const costLine = cost > 0
+    ? `Estimated local cost: $${cost < 0.01 ? cost.toFixed(4) : cost.toFixed(3)}`
+    : costTracked
+      ? 'Estimated local cost: unavailable or zero'
+      : 'Estimated local cost: no billable usage recorded';
 
   slashReply(`<pre>${[
     `Session: ${ctx.esc(session?.name || 'Current chat')}`,
@@ -2415,7 +2477,7 @@ async function _cmdDemo(args, ctx) {
   const delay = ms => new Promise(r => setTimeout(r, ms));
 
   // ── Welcome ──
-  await typewriterReply('Welcome to Odysseus! Lets begin the tour!');
+  await typewriterReply('Welcome to UNVEIL! Lets begin the tour!');
   // Beat between the welcome line and the first hint so it doesn't snap in.
   await delay(900);
 
@@ -2453,8 +2515,8 @@ async function _cmdDemo(args, ctx) {
     { sel: '#sidebar-new-chat-btn', text: 'Start a new chat here. <b>Click it.</b> You can do it!', mode: 'click',
       before() { if (sidebar?.classList.contains('hidden')) sidebar.classList.remove('hidden'); } },
     { sel: '#model-picker-btn',   text: 'Pick your LLM, Local or API.', advanceOnClick: true },
-    { sel: '#mode-agent-btn',     text: '<b>Agent mode</b> gives Odysseus more control of the app when your model supports tools: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
-    { sel: '#web-toggle-btn',     text: 'Toggle tools like <b>web search</b>. Odysseus comes with private built-in <b>SearXNG</b> search.', mode: 'click' },
+    { sel: '#mode-agent-btn',     text: '<b>Agent mode</b> gives UNVEIL more control of the app when your model supports tools: create a theme, download a model, make a daily task, organize things, and more.', mode: 'click' },
+    { sel: '#web-toggle-btn',     text: 'Toggle tools like <b>web search</b>. UNVEIL comes with private built-in <b>SearXNG</b> search.', mode: 'click' },
     { sel: '#overflow-plus-btn',  text: 'More tools can be found here, or in your sidebar. <b>Click to peek.</b>',
       advanceOnClick: true, pulseNext: true, afterDelay: 2200 },
     { sel: '#message',            text: 'Write your prompt here. Drag and drop files to attach them. <b>/prompt</b> for random prompt, <b>/help</b> for more.',
@@ -2484,7 +2546,7 @@ async function _cmdDemo(args, ctx) {
   }
 
   _clearTour();
-  await typewriterReply('Odysseus is yours to explore, enjoy the voyage!');
+  await typewriterReply('UNVEIL is yours to explore, enjoy the voyage!');
   return true;
 }
 
@@ -2682,7 +2744,7 @@ async function _cmdTourCompare(args, ctx) {
     { sel: '#compare-model-overlay .compare-parallel-toggle',
       text: '<b>Parallel</b> runs side by side, toggle to <b>Sequential</b> as well.' },
     { sel: '#compare-model-overlay .compare-dice-toggle',
-      text: '<b>Shuffle</b> picks the models in your entire list of endpoints. Combine with <b>Blind Mode</b> and you get the cleanest evaluation.' },
+      text: '<b>Shuffle</b> picks the models in your entire list of endpoints. Combine with <b>Blind Mode</b> for the cleanest comparison.' },
   ];
 
   for (let i = 0; i < phase1.length; i++) {
@@ -2751,7 +2813,7 @@ async function _cmdTourCompare(args, ctx) {
     { sel: '#compare-shuffle-btn',
       text: 'After adding, <b>Shuffle</b> to randomize the order again.' },
     { sel: '#cmp-eval-btn',
-      text: 'When you’re ready to test, feel free to use curated <b>evaluation prompts</b>.',
+      text: 'When you’re ready to test, use the curated <b>comparison prompts</b>.',
       advanceOnClick: true },
   ];
 
@@ -3199,7 +3261,7 @@ async function _cmdTourTheme(args, ctx) {
   // work as a fallback (read past without touching anything).
   const steps = [
     { sel: '#theme-popup',
-      text: '<b>Welcome to Theme.</b> Odysseus is yours to customize!',
+      text: '<b>Welcome to Theme.</b> UNVEIL is yours to customize!',
       placement: 'center-above',
       before: () => _clickTab('theme-tab-browse') },
     { sel: '#themeGrid',
@@ -3431,7 +3493,7 @@ async function _cmdTourSettings(args, ctx) {
       text: '<b>AI Defaults</b> — three roles share the work. Let\'s walk through them.',
       before: () => _clickNav('ai') },
     { sel: '#settings-modal .admin-card:has(#set-defaultModelSelect)',
-      text: '<b>Default Chat Model</b> — your main model. The one Odysseus reaches for whenever you start a new chat.',
+      text: '<b>Default Chat Model</b> — your main model. The one UNVEIL reaches for whenever you start a new chat.',
       before: () => _clickNav('ai') },
     { sel: '#settings-modal .admin-card:has(#set-utilityModelSelect)',
       text: '<b>Utility Model</b> — your hard-working sidekick. Runs background tasks (compaction, cleanup, auto-naming, summarization) so your chat model doesn\'t burn cycles on chores. <b>Recommend a small local model</b> here — it\'s free and always on.',
@@ -3452,7 +3514,7 @@ async function _cmdTourSettings(args, ctx) {
       text: '<b>Email</b> — sync schedule, drafts, snooze defaults — everything email-flow related.',
       before: () => _clickNav('email') },
     { sel: '#settings-modal .settings-nav-item[data-settings-tab="reminders"]',
-      text: '<b>Reminders</b> — quiet hours and how Odysseus nudges you about calendar + urgent email.',
+      text: '<b>Reminders</b> — quiet hours and how UNVEIL nudges you about calendar + urgent email.',
       before: () => _clickNav('reminders') },
   ];
 
@@ -3865,7 +3927,7 @@ async function _cmdTourNotes(args, ctx) {
       text: '<b>Notes</b> is your basic todo list, and also where reminders are managed.',
       placement: 'center-above' },
     { sel: '#notes-pane .notes-pane-body',
-      text: 'Your notes show up here. You can also <b>ask Odysseus in chat</b> to take a note for you.' },
+      text: 'Your notes show up here. You can also <b>ask UNVEIL in chat</b> to take a note for you.' },
     { sel: '#notes-search',
       text: '<b>Search</b> across every note — title, body, tags, the works.' },
     { sel: '#notes-view-toggle',
@@ -3893,7 +3955,7 @@ async function _cmdTourNotes(args, ctx) {
   return true;
 }
 
-// ── Tour: Brain ──
+// ── Tour: Memory ──
 async function _cmdTourBrain(args, ctx) {
   const _msgEl = document.getElementById('message');
   if (_msgEl) {
@@ -3935,7 +3997,7 @@ async function _cmdTourBrain(args, ctx) {
     }
   }
   if (!modal || modal.classList.contains('hidden')) {
-    slashReply('Could not open Brain. Try clicking the Brain tool first.');
+    slashReply('Could not open Memory. Try clicking the Memory tool first.');
     return true;
   }
 
@@ -4063,7 +4125,7 @@ async function _cmdTourBrain(args, ctx) {
   const _tab = (name) => document.querySelector(`.memory-tab[data-memory-tab="${name}"]`)?.click();
   const steps = [
     { sel: '#memory-modal .memory-modal-content',
-      text: '<b>Brain</b> is where your memories are. You can edit them, or add new ones under <b>Add</b>. Wow.',
+      text: '<b>Memory</b> is where your memories are. You can edit them, or add new ones under <b>Add</b>. Wow.',
       before: () => _tab('browse'),
       placement: 'center-above' },
     { sel: '#memory-tidy-btn',
@@ -4090,7 +4152,7 @@ async function _cmdTourBrain(args, ctx) {
   }
 
   _clear();
-  await typewriterReply('That’s Brain — memories, skills, tidy, and settings in one place.');
+  await typewriterReply('That’s Memory — memories, skills, tidy, and settings in one place.');
   return true;
 }
 
@@ -4304,7 +4366,7 @@ async function _cmdTourTask1(args, ctx) {
       text: 'Tasks are <b>paused by default</b> — resume whichever ones make sense for you. (Or pause anything that\'s running.)' },
     { sel: '#tasks-modal .modal-body',
       text: 'When enabled, Tasks use the <b>utility model configured in Settings</b> for cleanup and organization jobs.' },
-  ], 'Use Tasks when you want Odysseus to handle background housekeeping.', {
+  ], 'Use Tasks when you want UNVEIL to handle background housekeeping.', {
     continueLabel: 'continue →',
     continueText: '<b>Part 1 done.</b> Want to keep going into <b>adding & managing tasks</b>?',
   });
@@ -4328,7 +4390,7 @@ async function _cmdTourTask2(args, ctx) {
     // re-show it when the user moves past this step so the tour lands
     // back where it started.
     { sel: '#message',
-      text: 'You can also <b>just ask in chat</b> — say "every weekday at 9am check for urgent emails" and Odysseus will create the task for you.',
+      text: 'You can also <b>just ask in chat</b> — say "every weekday at 9am check for urgent emails" and UNVEIL will create the task for you.',
       before: () => document.getElementById('tasks-modal')?.classList.add('hidden'),
       after:  () => document.getElementById('tasks-modal')?.classList.remove('hidden') },
   ], 'That\'s Tasks. Have it run the background bits so you can stay in chat.');
@@ -4973,16 +5035,22 @@ function _clearSetupCommandInput() {
   }
 }
 
-async function _setupProviderDeviceFlow(providerKey) {
+async function _setupProviderDeviceFlow(providerKey, options = {}) {
   _clearSetupGuideMessages();
   const config = PROVIDER_DEVICE_FLOWS[providerKey];
   if (!config) {
     await _setupReply('Provider not recognised.');
     return;
   }
-  await _setupReply(`Starting ${config.label} sign-in...`);
+  // `/setup chatgpt-subscription codex00` labels the new account so several
+  // ChatGPT subscriptions stay distinguishable. The label is cosmetic only.
+  const accountLabel = providerKey === 'chatgpt-subscription' ? String(options.label || '').trim().slice(0, 40) : '';
+  const formData = new FormData();
+  if (accountLabel) formData.append('label', accountLabel);
+  await _setupReply(`Starting ${config.label} sign-in${accountLabel ? ` for "${accountLabel}"` : ''}...`);
   try {
     const result = await runProviderDeviceFlow(providerKey, {
+      formData,
       onStart: async ({ start, authUrl }) => {
         const place = providerKey === 'copilot' ? 'GitHub' : 'OpenAI';
         const action = providerKey === 'copilot' ? 'approve the request' : 'enter the code';
@@ -5005,7 +5073,8 @@ async function _setupProviderDeviceFlow(providerKey) {
     });
     if (result.status === 'authorized') {
       const n = ((result.endpoint && result.endpoint.models) || []).length;
-      await _setupReply(`Connected - ${n} ${config.label} model${n !== 1 ? 's' : ''} available.`);
+      const connectedName = (result.endpoint && result.endpoint.name) || config.label;
+      await _setupReply(`Connected ${connectedName} - ${n} model${n !== 1 ? 's' : ''} available.`);
       if (modelsModule) modelsModule.refreshModels(true);
       return;
     }
@@ -5029,7 +5098,7 @@ async function _cmdSetup(args, ctx) {
   const topicArgs = args.slice(1);
   const deviceAuthProvider = _setupDeviceAuthProviderFromInput(topic);
   if (deviceAuthProvider) {
-    await _setupProviderDeviceFlow(deviceAuthProvider);
+    await _setupProviderDeviceFlow(deviceAuthProvider, { label: topicArgs.join(' ') });
     return true;
   }
   const provider = _setupProviderFromInput(topic);
@@ -5154,7 +5223,6 @@ async function _cmdShortcuts(args, ctx) {
   // Try to load user keybinds from settings
   let keybinds = {
     search: 'ctrl+k',
-    toggle_sidebar: 'ctrl+b',
     new_session: 'ctrl+alt+n',
     star_session: 'ctrl+alt+s',
     delete_session: 'ctrl+alt+d',
@@ -5163,8 +5231,7 @@ async function _cmdShortcuts(args, ctx) {
   };
 
   try {
-    const res = await fetch(`${API_BASE}/api/auth/settings`, { credentials: 'same-origin' });
-    const settings = await res.json();
+    const settings = await getSettings();
     if (settings.keybinds) {
       keybinds = { ...keybinds, ...settings.keybinds };
     }
@@ -5180,7 +5247,6 @@ async function _cmdShortcuts(args, ctx) {
 
   const entries = [
     [formatCombo(keybinds.search), 'Search conversations'],
-    [formatCombo(keybinds.toggle_sidebar), 'Toggle sidebar'],
     [formatCombo(keybinds.new_session), 'New session'],
     [formatCombo(keybinds.star_session), 'Star / unstar session'],
     [formatCombo(keybinds.delete_session), 'Delete session'],
@@ -5218,7 +5284,7 @@ const _ODYSSEY_QUOTES = [
   "A man who has been through bitter experiences and travelled far enjoys even his sufferings after a time.",
   "For a friend with an understanding heart is worth no less than a brother.",
   "The wine urges me on, the bewitching wine, which sets even a wise man to singing and to laughing gently.",
-  "I am Odysseus, son of Laertes, known to all for my cunning. My fame reaches even unto heaven.",
+  "I am UNVEIL, son of Laertes, known to all for my cunning. My fame reaches even unto heaven.",
 ];
 
 const _8BALL = [
@@ -5260,7 +5326,7 @@ function _eggRender(html) {
   div.className = 'msg msg-ai';
   const role = document.createElement('div');
   role.className = 'role';
-  role.textContent = 'Odysseus';
+  role.textContent = 'UNVEIL';
   div.appendChild(role);
   const body = document.createElement('div');
   body.className = 'body';
@@ -5268,6 +5334,29 @@ function _eggRender(html) {
   div.appendChild(body);
   chatBox.appendChild(div);
   uiModule.scrollHistory();
+}
+
+// Delegated handlers for egg commands that used inline onclick (blocked by
+// Firefox CSP script-src-attr). Dice re-roll + color copy.
+if (!window._eggDelegatedBound) {
+  window._eggDelegatedBound = true;
+  document.addEventListener('click', (e) => {
+    const dice = e.target.closest && e.target.closest('.egg-dice');
+    if (dice) {
+      const sides = Math.min(parseInt(dice.dataset.diceSides) || 6, 1000);
+      dice.style.animation = 'none';
+      void dice.offsetHeight;
+      dice.textContent = Math.floor(Math.random() * sides) + 1;
+      dice.style.animation = 'egg-shake 0.3s ease';
+      return;
+    }
+    const swatch = e.target.closest && e.target.closest('.egg-color-copy');
+    if (swatch) {
+      navigator.clipboard.writeText(swatch.dataset.color || '');
+      swatch.style.transform = 'scale(0.9)';
+      setTimeout(() => { swatch.style.transform = ''; }, 150);
+    }
+  });
 }
 
 async function _cmdFlip(args, ctx) {
@@ -5307,7 +5396,7 @@ async function _cmdRoll(args, ctx) {
   const results = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
   const total = results.reduce((a, b) => a + b, 0);
   const dice = results.map((v, i) => {
-    return `<div style="min-width:42px;height:42px;border-radius:6px;border:2px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--red);animation:egg-spin 0.5s ease-out ${i*0.08}s both;cursor:pointer" title="d${sides}" onclick="this.style.animation='none';this.offsetHeight;var r=Math.floor(Math.random()*${sides})+1;this.textContent=r;this.style.animation='egg-shake 0.3s ease'">${v}</div>`;
+    return `<div style="min-width:42px;height:42px;border-radius:6px;border:2px solid var(--border);background:var(--panel);display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:var(--red);animation:egg-spin 0.5s ease-out ${i*0.08}s both;cursor:pointer" class="egg-dice" data-dice-sides="${sides}" title="d${sides}">${v}</div>`;
   }).join('');
   const totalHtml = count > 1 ? `<div style="font-size:0.8em;opacity:0.5;margin-top:4px">${count}d${sides} = ${total}</div>` : '';
   _eggRender(`<div style="display:flex;flex-direction:column;align-items:center;gap:4px"><div style="display:flex;gap:6px;flex-wrap:wrap;justify-content:center">${dice}</div>${totalHtml}</div>`);
@@ -5361,7 +5450,7 @@ async function _cmdOdyssey(args, ctx) {
 }
 
 async function _cmdAscii(args, ctx) {
-  const text = args.join(' ') || 'Odysseus';
+  const text = args.join(' ') || 'UNVEIL';
   const FONT = {
     'A':'  #  \n # # \n#####\n#   #\n#   #','B':'#### \n#   #\n#### \n#   #\n#### ','C':' ####\n#    \n#    \n#    \n ####',
     'D':'#### \n#   #\n#   #\n#   #\n#### ','E':'#####\n#    \n###  \n#    \n#####','F':'#####\n#    \n###  \n#    \n#    ',
@@ -5624,7 +5713,7 @@ async function _cmdColor(args, ctx) {
   const hex = args[0] || '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6,'0');
   const c = hex.startsWith('#') ? hex : '#' + hex;
   _eggRender(`<div style="display:flex;align-items:center;gap:12px;animation:egg-fade 0.3s ease-out">
-    <div style="width:48px;height:48px;border-radius:4px;border:1px solid var(--border);background:${ctx.esc(c)};cursor:pointer" title="Click to copy" onclick="navigator.clipboard.writeText('${ctx.esc(c)}');this.style.transform='scale(0.9)';setTimeout(()=>this.style.transform='',150)"></div>
+    <div style="width:48px;height:48px;border-radius:4px;border:1px solid var(--border);background:${ctx.esc(c)};cursor:pointer" class="egg-color-copy" data-color="${ctx.esc(c)}" title="Click to copy"></div>
     <div style="display:flex;flex-direction:column;gap:2px"><code style="font-size:1.1em">${ctx.esc(c)}</code>
       <span style="font-size:0.75em;opacity:0.4">click swatch to copy</span>
     </div>
@@ -5654,7 +5743,7 @@ async function _cmdHelp(args, ctx) {
       categories[cat].push(`  ${usage.padEnd(21)}${desc}`);
     }
   }
-  const order = ['Getting started', 'Tours', 'Chats', 'Settings', 'Memory', 'Productivity', 'AI Tools'];
+  const order = ['Getting started', 'Tours', 'Chats', 'Settings', 'Memory', 'Skills', 'Productivity', 'AI Tools'];
   let lines = [];
   for (const cat of order) {
     if (categories[cat] && categories[cat].length) {
@@ -5731,6 +5820,14 @@ const COMMANDS = {
       '_show':     { handler: _cmdToggleShow,      alias: [],     help: 'Show all toggle states',  usage: '/toggle' }
     }
   },
+  workspace: {
+    alias: ['ws'],
+    category: 'Agent',
+    help: 'Set the folder the agent works in',
+    handler: _cmdWorkspace,
+    noUserBubble: true,
+    usage: '/workspace [set <path> | clear | pick]',
+  },
   memory: {
     alias: ['m'],
     category: 'Memory',
@@ -5745,14 +5842,14 @@ const COMMANDS = {
   },
   skills: {
     alias: ['skill'],
-    category: 'Memory',
+    category: 'Skills',
     help: 'List, search, inspect, or run skills',
     handler: _cmdSkills,
     usage: '/skills list | search query | view name | use name request',
   },
   'reload-skills': {
     alias: ['reload_skills'],
-    category: 'Memory',
+    category: 'Skills',
     help: 'Refresh the slash skill catalog',
     handler: _cmdReloadSkills,
     usage: '/reload-skills',
@@ -5876,7 +5973,7 @@ const COMMANDS = {
   'tour-brain': {
     alias: ['brain-tour', 'tour-memory', 'memory-tour'],
     category: 'Tours',
-    help: 'Brain tour: memories, tidy, skills, settings',
+    help: 'Memory tour: memories, tidy, skills, settings',
     handler: _cmdTourBrain,
     usage: '/tour-brain'
   },
@@ -5954,7 +6051,7 @@ const COMMANDS = {
   brain: {
     alias: ['memories'],
     category: 'Tools',
-    help: 'Open Brain',
+    help: 'Open Memory',
     handler: (args, ctx) => _cmdToolPanel('brain', args, ctx),
     usage: '/brain'
   },
