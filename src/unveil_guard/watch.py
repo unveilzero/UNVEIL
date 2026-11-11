@@ -44,7 +44,7 @@ def _fingerprint_files() -> str:
 class GuardWatch:
     def __init__(self, guard: Optional[UnveilGuard] = None, *, interval: Optional[float] = None):
         self.guard = guard or get_guard()
-        self.interval = float(interval if interval is not None else os.getenv("UNVEIL_WATCH_INTERVAL", "60"))
+        self.interval = float(interval if interval is not None else (os.getenv("UNVEIL_WATCH_INTERVAL") or "60"))
         if self.interval <= 0:
             raise ValueError("UNVEIL_WATCH_INTERVAL must be positive")
         self.anchor_path = self.guard.directory / "audit_anchor.json"

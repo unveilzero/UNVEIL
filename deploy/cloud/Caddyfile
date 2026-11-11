@@ -1,0 +1,17 @@
+# HTTPS front door for UNVEIL. Caddy obtains and renews the certificate for
+# UNVEIL_DOMAIN on its own; ports 80 and 443 must be open to the internet.
+{$UNVEIL_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "same-origin"
+		-Server
+	}
+
+	# flush_interval -1 keeps streamed chat replies arriving as they are written.
+	reverse_proxy odysseus:7000 {
+		flush_interval -1
+	}
+}

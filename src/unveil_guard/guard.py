@@ -162,13 +162,13 @@ class UnveilGuard:
                  key: Optional[bytes] = None, clock=time.time):
         self.directory = Path(directory) if directory is not None else _data_dir()
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.mode = (mode or os.getenv("UNVEIL_GUARD_MODE", "enforce")).strip().lower()
+        self.mode = (mode or os.getenv("UNVEIL_GUARD_MODE") or "enforce").strip().lower()
         if self.mode not in {"enforce", "observe"}:
             raise ValueError("UNVEIL_GUARD_MODE must be 'enforce' or 'observe'")
-        self.profile = (profile or os.getenv("UNVEIL_GUARD_PROFILE", "standard")).strip().lower()
+        self.profile = (profile or os.getenv("UNVEIL_GUARD_PROFILE") or "standard").strip().lower()
         if self.profile not in PROFILES:
             raise ValueError(f"UNVEIL_GUARD_PROFILE must be one of {sorted(PROFILES)}")
-        self.window = float(window if window is not None else os.getenv("UNVEIL_GUARD_WINDOW", "300"))
+        self.window = float(window if window is not None else (os.getenv("UNVEIL_GUARD_WINDOW") or "300"))
         self.sequences = PROFILES[self.profile]
         self._clock = clock
         self.audit_path = self.directory / "guard_audit.jsonl"

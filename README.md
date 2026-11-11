@@ -28,6 +28,10 @@ Open `http://localhost:7011` when the containers are healthy. The first admin pa
 
 The compose files build the image from this source. They do not pull the upstream Odysseus image, which does not contain the security layer.
 
+## Cloud hosting
+
+To run UNVEIL on a rented server with HTTPS, so it is always on and installable on a phone, follow [deploy/cloud/README.md](deploy/cloud/README.md).
+
 ## Security Layer
 
 Every tool call an agent makes is checked by ARAD ([agent-runtime-anomaly-detector](https://github.com/unveilzero/agent-runtime-anomaly-detector)) as the last step before it runs. The check comes after Odysseus's own permission and approval system and can only deny.

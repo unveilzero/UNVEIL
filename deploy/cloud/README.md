@@ -1,0 +1,50 @@
+# Hosting UNVEIL in the cloud
+
+This runs UNVEIL on a rented Linux server so it is always on and reachable from a phone or any browser over HTTPS.
+
+## What you need
+
+- A Linux server with Docker installed. 2 CPU cores and 4 GB of memory is a workable minimum.
+- A domain or subdomain whose DNS record points at the server's IP address.
+- Ports 80 and 443 open to the internet. Nothing else needs to be open.
+- An AI model provider account, since a small server cannot run a large model itself.
+
+## Start it
+
+```bash
+git clone https://github.com/unveilzero/UNVEIL.git
+cd UNVEIL
+cp deploy/cloud/.env.example deploy/cloud/.env
+# edit deploy/cloud/.env: domain, admin password, audit key
+docker compose --env-file deploy/cloud/.env \
+  -f docker-compose.yml -f deploy/cloud/docker-compose.cloud.yml up -d --build
+```
+
+Open `https://your-domain`. Sign in as `admin` with the password you set, then change it.
+
+The start is refused if the domain, the admin password or the audit key is missing.
+
+## What this setup fixes in place
+
+- Login is required for everything, and there is no loopback bypass.
+- Session cookies are only sent over HTTPS.
+- The app listens on the server's loopback address. Only the HTTPS front door is public.
+- The security layer runs in enforce mode with its audit key supplied from outside the data volume.
+
+## On a phone
+
+Open the address in the phone's browser and choose "Add to Home Screen". UNVEIL then opens full screen from its own icon. The agents and the security layer keep running on the server when the phone is closed.
+
+## Updating
+
+```bash
+git pull
+docker compose --env-file deploy/cloud/.env \
+  -f docker-compose.yml -f deploy/cloud/docker-compose.cloud.yml up -d --build
+```
+
+## Keep in mind
+
+- Chats, files and the audit log live in `./data` on the server. Back it up.
+- Keep a copy of `UNVEIL_AUDIT_KEY` off the server. Without the original key the audit log cannot be verified.
+- Anyone on the internet can reach the login page. Use a long password and keep the server's system updates on.

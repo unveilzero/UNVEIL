@@ -293,3 +293,39 @@ async def test_real_dispatcher_refuses_to_run_a_tool_the_guard_blocks(monkeypatc
     description, result = await _write(tmp_path, "blocked.txt")
     assert description == "write_file: BLOCKED" and result["failure_kind"] == "unveil_guard_denied"
     assert not (tmp_path / "blocked.txt").exists()
+
+
+# -- deployment settings ------------------------------------------------------
+
+def test_empty_environment_values_fall_back_to_safe_defaults(tmp_path, monkeypatch):
+    # Docker Compose passes unset settings through as empty strings.
+    for name in ("UNVEIL_GUARD_MODE", "UNVEIL_GUARD_PROFILE", "UNVEIL_GUARD_WINDOW", "UNVEIL_WATCH_INTERVAL", "UNVEIL_AUDIT_KEY"):
+        monkeypatch.setenv(name, "")
+    guard = UnveilGuard(tmp_path / "guard")
+    assert (guard.mode, guard.profile, guard.window) == ("enforce", "standard", 300.0)
+    assert GuardWatch(guard).interval == 60.0
+    assert (tmp_path / "guard" / "audit.key").stat().st_size == 32
+
+
+def test_compose_files_pass_the_security_settings_into_the_container():
+    import yaml
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    for name in ("docker-compose.yml", "docker-compose.gpu-amd.yml", "docker-compose.gpu-nvidia.yml"):
+        environment = yaml.safe_load((root / name).read_text())["services"]["odysseus"]["environment"]
+        passed = {entry.split("=", 1)[0] for entry in environment}
+        assert {"UNVEIL_GUARD_MODE", "UNVEIL_GUARD_PROFILE", "UNVEIL_GUARD_WINDOW", "UNVEIL_WATCH_INTERVAL", "UNVEIL_AUDIT_KEY"} <= passed, name
+
+
+def test_cloud_overlay_requires_login_https_cookies_and_an_enforcing_guard():
+    import yaml
+    from pathlib import Path
+    root = Path(__file__).resolve().parents[1]
+    overlay = yaml.safe_load((root / "deploy/cloud/docker-compose.cloud.yml").read_text())
+    environment = dict(entry.split("=", 1) for entry in overlay["services"]["odysseus"]["environment"])
+    assert environment["AUTH_ENABLED"] == "true" and environment["LOCALHOST_BYPASS"] == "false"
+    assert environment["SECURE_COOKIES"] == "true" and environment["UNVEIL_GUARD_MODE"] == "enforce"
+    for required in ("UNVEIL_AUDIT_KEY", "ODYSSEUS_ADMIN_PASSWORD", "ALLOWED_ORIGINS"):
+        assert ":?" in environment[required], required
+    assert overlay["services"]["caddy"]["ports"] == ["80:80", "443:443", "443:443/udp"]
+    assert "reverse_proxy odysseus:7000" in (root / "deploy/cloud/Caddyfile").read_text()

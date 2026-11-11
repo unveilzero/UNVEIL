@@ -1,0 +1,41 @@
+# UNVEIL on a cloud server, reachable over HTTPS.
+#
+#   docker compose --env-file deploy/cloud/.env \
+#     -f docker-compose.yml -f deploy/cloud/docker-compose.cloud.yml up -d --build
+#
+# This overlay puts Caddy in front of the app (automatic HTTPS certificates)
+# and pins the settings an internet-facing server must have. The app itself
+# stays bound to the server's loopback address; only Caddy is public.
+services:
+  odysseus:
+    environment:
+      # Login is always required; no loopback bypass; cookies only over HTTPS.
+      - AUTH_ENABLED=true
+      - LOCALHOST_BYPASS=false
+      - SECURE_COOKIES=true
+      - ALLOWED_ORIGINS=https://${UNVEIL_DOMAIN:?Set UNVEIL_DOMAIN in deploy/cloud/.env}
+      - OAUTH_REDIRECT_BASE_URL=https://${UNVEIL_DOMAIN}
+      - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:?Set ODYSSEUS_ADMIN_PASSWORD in deploy/cloud/.env}
+      # Security layer: enforced, with the audit key supplied from outside the data volume.
+      - UNVEIL_GUARD_MODE=enforce
+      - UNVEIL_AUDIT_KEY=${UNVEIL_AUDIT_KEY:?Set UNVEIL_AUDIT_KEY in deploy/cloud/.env}
+
+  caddy:
+    image: docker.io/library/caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      - UNVEIL_DOMAIN=${UNVEIL_DOMAIN}
+    volumes:
+      - ./deploy/cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - odysseus
+
+volumes:
+  caddy_data:
+  caddy_config:
