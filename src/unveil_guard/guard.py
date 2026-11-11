@@ -60,7 +60,7 @@ PROFILES = {
 _SECRET_PATTERN = re.compile(
     r"(\.env\b|\.ssh\b|id_rsa|id_ed25519|\.pem\b|\.aws\b|\.gnupg|\.netrc|\.npmrc|\.pypirc|keychain|"
     r"credentials?\b|secrets?\b|api[_-]?keys?\b|access[_-]?tokens?\b|private[_-]?key|passwd\b|shadow\b|"
-    r"wallet\.dat|auth\.json|\.kube/config)",
+    r"wallet\.dat|auth\.json|audit\.key|\.kube/config)",
     re.IGNORECASE,
 )
 _NETWORK_PATTERN = re.compile(
@@ -70,6 +70,21 @@ _NETWORK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SECRET_TOOLS = frozenset({"manage_tokens"})
+# Human authority. Agents may never change the application's own code, the
+# login store, or this security layer; and a change to the application's
+# settings needs a human's approval of that exact action, whatever approval
+# mode is configured.
+_PROTECTED_PATTERN = re.compile(
+    r"(unveil_guard|unveil_security_routes|tool_execution\.py|mcp_manager\.py|auth\.json|audit\.key|"
+    r"guard_audit\.jsonl|audit_anchor\.json|UNVEIL_GUARD_|UNVEIL_AUDIT_KEY|UNVEIL_WATCH_)",
+    re.IGNORECASE,
+)
+_APP_ROOT = str(Path(__file__).resolve().parents[2])
+_CHANGING_ACTIONS = frozenset({"WRITE", "EXECUTE", "ADMIN_CHANGE"})
+# Tools that change how the application itself is configured or reached.
+_HUMAN_APPROVAL_TOOLS = frozenset({
+    "manage_settings", "manage_tokens", "manage_mcp", "manage_endpoints", "manage_webhooks",
+})
 # How long the status stays "blocked" after the latest block.
 RECENT_BLOCK_SECONDS = 600
 
@@ -112,9 +127,9 @@ def classify(tool: str, content: str) -> tuple[str, ...]:
             actions.add(PRIVATE_READ)
         if ToolEffect.EXECUTE_CODE in effects:
             actions.add(EXECUTE)
-        if effects & {ToolEffect.ADMIN_CHANGE, ToolEffect.DESTRUCTIVE}:
+        if ToolEffect.ADMIN_CHANGE in effects:
             actions.add(ADMIN_CHANGE)
-        if effects & {ToolEffect.WRITE_WORKSPACE, ToolEffect.WRITE_PRIVATE}:
+        if effects & {ToolEffect.WRITE_WORKSPACE, ToolEffect.WRITE_PRIVATE, ToolEffect.DESTRUCTIVE}:
             actions.add(WRITE)
         if effects & {ToolEffect.READ_PUBLIC, ToolEffect.READ_WORKSPACE, ToolEffect.BROKERED_NETWORK_READ}:
             actions.add(READ)
@@ -195,8 +210,20 @@ class UnveilGuard:
                 "reason": reason, "agent": agent, "session": (session_id or "")[:12], "owner": owner or "",
             })
 
+    @staticmethod
+    def _human_authority_violation(tool: str, actions: tuple[str, ...], content: str,
+                                   human_approved: bool) -> Optional[str]:
+        if not _CHANGING_ACTIONS.intersection(actions):
+            return None
+        text = content if isinstance(content, str) else ""
+        if _PROTECTED_PATTERN.search(text) or _APP_ROOT in text:
+            return "protected_resource"
+        if tool in _HUMAN_APPROVAL_TOOLS and ADMIN_CHANGE in actions and not human_approved:
+            return "human_authorization_required"
+        return None
+
     def check(self, tool: str, content: str, *, owner: Optional[str], session_id: Optional[str],
-              system: bool = False) -> GuardDecision:
+              system: bool = False, human_approved: bool = False) -> GuardDecision:
         """Decide one tool call. Raises nothing; an internal failure is a BLOCK."""
         enforced = self.mode == "enforce"
         actions: tuple[str, ...] = ()
@@ -217,10 +244,12 @@ class UnveilGuard:
             actions = classify(tool, content)
             verdict, reason = "ALLOW", "allowed_by_policy"
             present = set(actions)
+            violation = self._human_authority_violation(tool, actions, content, human_approved)
+            if violation:
+                verdict, reason = "BLOCK", violation
             for first, second in self.sequences:
-                if first in present and second in present:
+                if verdict == "ALLOW" and first in present and second in present:
                     verdict, reason = "BLOCK", f"correlated_actions:{first}->{second}:same_call"
-                    break
             digest = hashlib.sha256((content or "").encode("utf-8", "replace")).hexdigest()[:12]
             # One decision at a time, with a clock that never runs backwards, so
             # concurrent calls cannot trip the monitor's ordering checks.
@@ -296,10 +325,18 @@ def reset_guard_for_tests(guard: Optional[UnveilGuard] = None) -> None:
     _guard = guard
 
 
-def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id: Optional[str]):
+_REASON_TEXT = {
+    "protected_resource": "agents cannot change the application's code, logins or security layer",
+    "human_authorization_required": "this settings change needs a person to approve this exact action",
+}
+
+
+def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id: Optional[str],
+                    human_approved: bool = False):
     """Gate used by the tool dispatcher. Returns None to proceed, or a blocked result tuple."""
     try:
-        decision = get_guard().check(tool, content, owner=owner, session_id=session_id)
+        decision = get_guard().check(tool, content, owner=owner, session_id=session_id,
+                                     human_approved=human_approved)
     except Exception as error:  # the guard could not even be built: fail closed
         logger.exception("UNVEIL guard unavailable")
         return f"{tool}: BLOCKED", {
@@ -308,8 +345,9 @@ def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id
         }
     if not decision.blocked:
         return None
+    detail = _REASON_TEXT.get(decision.reason)
     return f"{tool}: BLOCKED", {
-        "error": f"Blocked by the UNVEIL security layer (ARAD): {decision.reason}",
+        "error": f"Blocked by the UNVEIL security layer (ARAD): {decision.reason}" + (f" ({detail})" if detail else ""),
         "exit_code": 1, "blocked": True, "failure_kind": "unveil_guard_denied",
         "policy": "unveil_guard", "unveil_reason": decision.reason,
     }

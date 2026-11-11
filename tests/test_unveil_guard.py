@@ -7,7 +7,7 @@ import pytest
 
 from src.unveil_guard import UnveilGuard, get_guard, guard_direct_mcp_call, guard_tool_call, guarded_call
 from src.unveil_guard.guard import (
-    EXECUTE, OUTBOUND, PRIVATE_READ, READ, SECRET_READ, classify,
+    ADMIN_CHANGE, EXECUTE, OUTBOUND, PRIVATE_READ, READ, SECRET_READ, classify,
 )
 from src.unveil_guard.watch import GuardWatch
 from tests.runtime_evidence_helpers import server_authorized_executor
@@ -110,6 +110,51 @@ def test_status_reports_blocked_after_a_block_and_clears_later(tmp_path):
     now[0] += 601
     assert guard.status()["state"] == "cleared"
     assert _guard(tmp_path / "observe", mode="observe").status()["state"] == "observe"
+
+
+
+# -- human authority ----------------------------------------------------------
+
+@pytest.mark.parametrize("tool, content", [
+    ("write_file", "/workspace/src/unveil_guard/guard.py\npass"),
+    ("write_file", "/workspace/data/auth.json\n{}"),
+    ("bash", "sed -i s/enforce/observe/ src/unveil_guard/guard.py"),
+    ("bash", "echo '{}' > data/auth.json"),
+    ("bash", "rm data/unveil/guard_audit.jsonl"),
+    ("bash", "export UNVEIL_GUARD_MODE=observe && python app.py"),
+    ("python", "open('src/tool_execution.py', 'w').write('')"),
+])
+def test_agents_cannot_change_code_logins_or_the_security_layer(tmp_path, tool, content):
+    guard = _guard(tmp_path)
+    for approved in (False, True):
+        decision = guard.check(tool, content, owner="george", session_id="s1", human_approved=approved)
+        assert decision.blocked and decision.reason == "protected_resource"
+
+
+def test_application_root_is_protected_from_commands(tmp_path):
+    from src.unveil_guard.guard import _APP_ROOT
+    guard = _guard(tmp_path)
+    decision = guard.check("bash", f"echo x >> {_APP_ROOT}/app.py", owner="george", session_id="s1")
+    assert decision.blocked and decision.reason == "protected_resource"
+    assert guard.check("bash", "ls -la", owner="george", session_id="s1").allowed
+
+
+def test_settings_changes_need_a_person_to_approve_the_exact_action(tmp_path):
+    guard = _guard(tmp_path)
+    change = ("manage_settings", '{"action": "set", "key": "theme", "value": "dark"}')
+    assert ADMIN_CHANGE in classify(*change)
+    denied = guard.check(*change, owner="george", session_id="s1")
+    assert denied.blocked and denied.reason == "human_authorization_required"
+    other_agent = guard.check(*change, owner="george", session_id="s2")
+    assert other_agent.blocked
+    assert guard.check(*change, owner="george", session_id="s1", human_approved=True).allowed
+
+
+def test_ordinary_work_is_not_affected_by_human_authority_rules(tmp_path):
+    guard = _guard(tmp_path)
+    for tool, content in (("write_file", "/workspace/notes/todo.md\nhello"), ("read_file", "/workspace/src/unveil_guard/guard.py"),
+                          ("bash", "pytest -q"), ("manage_notes", '{"action": "create", "title": "x"}')):
+        assert guard.check(tool, content, owner="george", session_id="s1").allowed, tool
 
 
 def test_internal_failure_is_a_block(tmp_path, monkeypatch):

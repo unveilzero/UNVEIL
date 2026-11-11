@@ -1941,7 +1941,8 @@ async def execute_tool_block(
     # UNVEIL security layer (ARAD). Last check before the tool runs: every
     # application check above has passed, and this one can only deny.
     from src.unveil_guard import guard_tool_call, guarded_call
-    unveil_block = guard_tool_call(operation.transport_tool, operation.input, owner=owner, session_id=session_id)
+    unveil_block = guard_tool_call(operation.transport_tool, operation.input, owner=owner, session_id=session_id,
+                                   human_approved=bool(approval_claimed))
     if unveil_block is not None:
         return unveil_block
 
