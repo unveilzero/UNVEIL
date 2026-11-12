@@ -58,7 +58,7 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
     name = (args.get("name") or args.get("skill_id") or "").strip()
 
     if action in ("list", "index"):
-        all_skills = sm.load(owner=owner)
+        all_skills = [sk for sk in sm.load(owner=owner) if sk.get("enabled") is not False]
         if not all_skills:
             return {"results": "No skills yet. Create one with action='add'."}
         published = [s for s in all_skills if s.get("status") == "published"]
@@ -79,6 +79,8 @@ async def do_manage_skills(content: str, owner: Optional[str] = None) -> Dict:
             return {"error": "name is required for view", "exit_code": 1}
         if args.get("path"):
             return {"error": "view reads SKILL.md only; use view_ref with name and path to read a supporting file.", "exit_code": 1}
+        if not sm.is_enabled(name, owner=owner):
+            return {"error": f"Skill {name!r} is switched off for this account", "exit_code": 1}
         md = sm.read_skill_md(name, owner=owner)
         if md is None:
             return {"error": f"Skill {name!r} not found", "exit_code": 1}

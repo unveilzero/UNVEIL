@@ -1858,7 +1858,8 @@ def _convert_openai_content_to_anthropic(content):
     return converted
 
 
-def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=False, tools=None):
+def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=False, tools=None,
+                             reasoning_effort=None):
     """Convert OpenAI-style messages to Anthropic format."""
     system_parts = []
     chat_messages = []
@@ -1927,6 +1928,12 @@ def _build_anthropic_payload(model, messages, temperature, max_tokens, stream=Fa
         payload["system"] = [system_block]
     if stream:
         payload["stream"] = True
+    # An explicit effort is sent only when this model accepts that level;
+    # otherwise the field is left out and the model's own default applies.
+    from src.reasoning_levels import claude_effort_metadata, validate_reasoning_effort
+    effort = validate_reasoning_effort(model, reasoning_effort) if claude_effort_metadata(model) else None
+    if effort:
+        payload["output_config"] = {"effort": effort}
     # Convert OpenAI-format tools to Anthropic format
     if tools:
         anthropic_tools = []
@@ -2367,7 +2374,8 @@ def llm_call(url: str, model: str, messages: List[Dict], temperature: float = LL
     if provider == "anthropic":
         target_url = _normalize_anthropic_url(url)
         h = _build_anthropic_headers(headers)
-        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens)
+        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens,
+                                           reasoning_effort=reasoning_effort)
     elif provider == "ollama":
         target_url = _normalize_ollama_url(url)
         payload = _build_ollama_payload(
@@ -2769,7 +2777,8 @@ async def llm_call_async(
     if provider == "anthropic":
         target_url = _normalize_anthropic_url(url)
         h = _build_anthropic_headers(headers)
-        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens)
+        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens,
+                                           reasoning_effort=reasoning_effort)
     elif provider == "ollama":
         target_url = _normalize_ollama_url(url)
         h = {"Content-Type": "application/json"}
@@ -3030,7 +3039,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
     if provider == "anthropic":
         target_url = _normalize_anthropic_url(url)
         h = _build_anthropic_headers(headers)
-        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens, stream=True, tools=tools)
+        payload = _build_anthropic_payload(model, messages_copy, temperature, max_tokens, stream=True, tools=tools,
+                                           reasoning_effort=reasoning_effort)
     elif provider == "ollama":
         target_url = _normalize_ollama_url(url)
         h = {"Content-Type": "application/json"}

@@ -243,7 +243,7 @@ def _effort_mode(model: str, raw_effort: Any) -> str:
     Validated like the chat routes do, so llama-swap advertised efforts persist
     as well as ChatGPT subscription levels.
     """
-    from src.chatgpt_subscription import validate_reasoning_effort
+    from src.reasoning_levels import validate_reasoning_effort
 
     effort = validate_reasoning_effort(model, raw_effort)
     return f"effort:{effort}" if effort else "off"

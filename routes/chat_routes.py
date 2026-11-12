@@ -2288,7 +2288,7 @@ def setup_chat_routes(
             reasoning_effort = str(req_effort).strip().lower()
         elif session_mode.startswith("effort:"):
             reasoning_effort = session_mode[7:].strip()
-        from src.chatgpt_subscription import validate_reasoning_effort
+        from src.reasoning_levels import validate_reasoning_effort
         reasoning_effort = validate_reasoning_effort(sess.model, reasoning_effort)
         owner = effective_user(request)
         _reconcile_selected_route_from_request(request, sess, session, {
@@ -2803,7 +2803,7 @@ def setup_chat_routes(
                 thinking_mode = "off"
             if reasoning_effort is None and session_mode.startswith("effort:"):
                 reasoning_effort = session_mode[7:].strip()
-            from src.chatgpt_subscription import validate_reasoning_effort
+            from src.reasoning_levels import validate_reasoning_effort
             reasoning_effort = validate_reasoning_effort(sess.model, reasoning_effort)
             if getattr(sess, "temperature_override", None) is not None:
                 temperature_override = float(sess.temperature_override)

@@ -805,7 +805,8 @@ function _buildTrackedBuiltinSkillCards(items) {
   return items.map(sk => {
     const name = sk.name || sk.id;
     const card = document.createElement('div');
-    card.className = 'doclib-card skill-card skill-builtin-card';
+    const on = sk.enabled !== false;
+    card.className = 'doclib-card skill-card skill-builtin-card' + (on ? '' : ' skill-switched-off');
     card.dataset.skillName = name;
     card.dataset.skillStatus = 'published';
 
@@ -818,6 +819,7 @@ function _buildTrackedBuiltinSkillCards(items) {
         ${(sk.tags && sk.tags.length) ? `<div class="skill-card-tags">${_skillTagPills(sk)}</div>` : ''}
       </div>
       <div class="skill-card-right">
+        <label class="admin-switch skill-enabled-switch" title="${on ? 'On: the agent can use this skill' : 'Off: the agent cannot use this skill'}"><input type="checkbox" class="skill-enabled-input" aria-label="Use ${esc(name)}" ${on ? 'checked' : ''} /><span class="admin-slider"></span></label>
         <span class="skill-chevron-up" title="Collapse"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></span>
       </div>
     `;
@@ -830,12 +832,42 @@ function _buildTrackedBuiltinSkillCards(items) {
     preview.appendChild(pre);
     card.appendChild(preview);
 
+    const toggle = header.querySelector('.skill-enabled-input');
+    if (toggle) toggle.addEventListener('change', () => _setSkillEnabled(sk, toggle, card));
     card.addEventListener('click', (e) => {
-      if (e.target.closest('button, input, textarea')) return;
+      if (e.target.closest('button, input, textarea, label')) return;
       _expandSkillCard(card, name);
     });
     return card;
   });
+}
+
+// Per-skill switch. The list of switched-off names is one user preference;
+// the server keeps those skills out of everything the agent is shown.
+async function _setSkillEnabled(sk, toggle, card) {
+  const name = sk.name || sk.id;
+  const wanted = toggle.checked;
+  const off = new Set(skills.filter(s => s && s.enabled === false).map(s => s.name || s.id));
+  if (wanted) off.delete(name); else off.add(name);
+  toggle.disabled = true;
+  try {
+    const res = await fetch(`${API}/api/prefs/skills_off`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ value: [...off].sort() }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    sk.enabled = wanted;
+    card.classList.toggle('skill-switched-off', !wanted);
+    toggle.closest('label').title = wanted ? 'On: the agent can use this skill' : 'Off: the agent cannot use this skill';
+    uiModule.showToast?.(`${name} switched ${wanted ? 'on' : 'off'}`);
+  } catch (err) {
+    toggle.checked = !wanted;
+    uiModule.showToast?.(`Could not change ${name}: ${err.message}`);
+  } finally {
+    toggle.disabled = false;
+  }
 }
 
 function renderSkillsList() {

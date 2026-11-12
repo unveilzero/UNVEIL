@@ -742,8 +742,8 @@ def setup_session_routes(
                 session.headers = {}
             if getattr(session, "thinking_mode", "").startswith("effort:"):
                 current_effort = session.thinking_mode[7:]
-                from src.chatgpt_subscription import get_chatgpt_model_metadata
-                meta = get_chatgpt_model_metadata(model)
+                from src.reasoning_levels import model_reasoning_metadata
+                meta = model_reasoning_metadata(model)
                 if not meta or current_effort not in [lvl.lower() for lvl in meta.get("supported_reasoning_levels", [])]:
                     session.thinking_mode = "off"
             # Persist to DB

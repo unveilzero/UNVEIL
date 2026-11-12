@@ -1715,8 +1715,11 @@ def setup_model_routes(model_discovery):
                         curated.append(m)
                 models_metadata = {}
                 from src.chatgpt_subscription import get_chatgpt_model_metadata
+                from src.reasoning_levels import claude_effort_metadata
                 for mid in list(curated) + list(extra):
                     meta = get_chatgpt_model_metadata(mid)
+                    if not meta and provider == "anthropic":
+                        meta = claude_effort_metadata(mid)
                     if meta:
                         models_metadata[mid] = meta
                 items.append({

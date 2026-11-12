@@ -9,7 +9,10 @@ from src.tools.system import do_manage_skills
 EXPECTED_BUILTIN_SKILLS = {
     "action-evidence-synthesis",
     "artifact-completion",
+    "context-budget",
     "developer-docs",
+    "interface-design",
+    "memory-hygiene",
     "multimodal-evidence",
     "reviewable-external-draft",
     "scheduling-coordination",

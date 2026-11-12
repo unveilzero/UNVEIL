@@ -75,6 +75,18 @@ def _approval_policy(owner: Optional[str]) -> tuple[bool, float]:
     return bool(prefs.get("auto_approve_skills", True)), max(0.0, min(1.0, minimum))
 
 
+def _switched_off(owner: Optional[str]) -> frozenset:
+    """Names of skills this user has switched off (the ``skills_off`` preference)."""
+    try:
+        from routes.prefs_routes import _load_for_user
+        value = (_load_for_user(owner) or {}).get("skills_off")
+    except Exception:
+        value = None
+    if not isinstance(value, (list, tuple, set, frozenset)):
+        return frozenset()
+    return frozenset(name for name in value if isinstance(name, str) and name)
+
+
 # ---------------------------------------------------------------------------
 # SkillsManager
 # ---------------------------------------------------------------------------
@@ -344,18 +356,24 @@ class SkillsManager:
 
     def load(self, owner: Optional[str] = None) -> List[Dict]:
         entries = self.load_all()
-        if owner is None:
-            return entries
         # SECURITY: strict ownership filter. The previous predicate also
         # included skills with NO owner field (`not s.get("owner")`), which
         # leaked legacy / un-stamped skills to every authenticated user.
         # Hide them now; the owner needs to be backfilled on disk if those
         # skills should be visible to a specific user.
-        return [
-            s for s in entries
-            if s.get("owner") == owner
-            or (s.get("source") == "builtin" and not s.get("owner"))
-        ]
+        if owner is not None:
+            entries = [
+                s for s in entries
+                if s.get("owner") == owner
+                or (s.get("source") == "builtin" and not s.get("owner"))
+            ]
+        # A switched-off skill stays listed, marked ``enabled: False``, so the
+        # user can turn it back on. It is kept out of everything the agent sees.
+        off = _switched_off(owner)
+        return [{**s, "enabled": s.get("name") not in off} for s in entries]
+
+    def is_enabled(self, name: str, owner: Optional[str] = None) -> bool:
+        return name not in _switched_off(owner)
 
     # ----------------------------------------------------------------------
     # CRUD — disk-backed
@@ -703,6 +721,8 @@ class SkillsManager:
         auto_approve, min_confidence = _approval_policy(owner)
         out = []
         for s in self.load(owner=owner):
+            if s.get("enabled") is False:
+                continue
             status = s.get("status")
             # Published + None (pre-status legacy) always included.
             # Drafts only if the teacher wrote them.
@@ -782,6 +802,7 @@ class SkillsManager:
         skills = [
             s for s in skills
             if s.get("status") in ("published", "draft")
+            and s.get("enabled") is not False
             and str(s.get("audit_verdict") or "").lower()
             not in {"needs_work", "fail", "skipped"}
         ]
