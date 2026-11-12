@@ -17,7 +17,6 @@ services:
       - OAUTH_REDIRECT_BASE_URL=https://${UNVEIL_DOMAIN}
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:?Set ODYSSEUS_ADMIN_PASSWORD in deploy/cloud/.env}
       # Security layer: enforced, with the audit key supplied from outside the data volume.
-      - UNVEIL_GUARD_MODE=enforce
       - UNVEIL_AUDIT_KEY=${UNVEIL_AUDIT_KEY:?Set UNVEIL_AUDIT_KEY in deploy/cloud/.env}
 
   caddy:

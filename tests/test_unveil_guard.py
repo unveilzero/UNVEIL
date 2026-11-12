@@ -33,7 +33,7 @@ def test_ordinary_calls_are_allowed_and_audited(tmp_path):
     guard = _guard(tmp_path)
     for tool, content in (("read_file", '{"path": "a.md"}'), ("web_fetch", '{"url": "https://example.com"}')):
         assert guard.check(tool, content, owner="george", session_id="s1").allowed
-    assert guard.status()["counts"] == {"allowed": 2, "blocked": 0, "would_block": 0}
+    assert guard.status()["counts"] == {"allowed": 2, "blocked": 0}
     assert guard.monitor.verify_audit_log()["keyed"] is True
 
 
@@ -79,12 +79,16 @@ def test_strict_profile_also_blocks_private_read_then_outbound(tmp_path):
     assert strict.check("web_fetch", '{"url": "https://example.com"}', owner="george", session_id="s1").blocked
 
 
-def test_observe_mode_reports_without_enforcing(tmp_path):
-    guard = _guard(tmp_path, mode="observe")
+def test_enforcement_cannot_be_switched_off(tmp_path, monkeypatch):
+    monkeypatch.setenv("UNVEIL_GUARD_MODE", "observe")
+    guard = _guard(tmp_path)
     guard.check("read_file", '{"path": ".env"}', owner="george", session_id="s1")
     decision = guard.check("web_fetch", '{"url": "https://example.com"}', owner="george", session_id="s1")
-    assert not decision.allowed and not decision.blocked
-    assert guard.status()["counts"]["would_block"] == 1
+    assert decision.blocked and not decision.allowed
+    status = guard.status()
+    assert status["mode"] == "enforce" and status["counts"] == {"allowed": 1, "blocked": 1}
+    with pytest.raises(TypeError):
+        UnveilGuard(tmp_path / "other", key=KEY, mode="observe")
 
 
 def test_lockdown_blocks_everything_until_cleared(tmp_path):
@@ -109,7 +113,6 @@ def test_status_reports_blocked_after_a_block_and_clears_later(tmp_path):
     assert guard.status()["state"] == "blocked"
     now[0] += 601
     assert guard.status()["state"] == "cleared"
-    assert _guard(tmp_path / "observe", mode="observe").status()["state"] == "observe"
 
 
 
@@ -299,10 +302,10 @@ async def test_real_dispatcher_refuses_to_run_a_tool_the_guard_blocks(monkeypatc
 
 def test_empty_environment_values_fall_back_to_safe_defaults(tmp_path, monkeypatch):
     # Docker Compose passes unset settings through as empty strings.
-    for name in ("UNVEIL_GUARD_MODE", "UNVEIL_GUARD_PROFILE", "UNVEIL_GUARD_WINDOW", "UNVEIL_WATCH_INTERVAL", "UNVEIL_AUDIT_KEY"):
+    for name in ("UNVEIL_GUARD_PROFILE", "UNVEIL_GUARD_WINDOW", "UNVEIL_WATCH_INTERVAL", "UNVEIL_AUDIT_KEY"):
         monkeypatch.setenv(name, "")
     guard = UnveilGuard(tmp_path / "guard")
-    assert (guard.mode, guard.profile, guard.window) == ("enforce", "standard", 300.0)
+    assert (guard.profile, guard.window) == ("standard", 300.0)
     assert GuardWatch(guard).interval == 60.0
     assert (tmp_path / "guard" / "audit.key").stat().st_size == 32
 
@@ -314,17 +317,18 @@ def test_compose_files_pass_the_security_settings_into_the_container():
     for name in ("docker-compose.yml", "docker-compose.gpu-amd.yml", "docker-compose.gpu-nvidia.yml"):
         environment = yaml.safe_load((root / name).read_text())["services"]["odysseus"]["environment"]
         passed = {entry.split("=", 1)[0] for entry in environment}
-        assert {"UNVEIL_GUARD_MODE", "UNVEIL_GUARD_PROFILE", "UNVEIL_GUARD_WINDOW", "UNVEIL_WATCH_INTERVAL", "UNVEIL_AUDIT_KEY"} <= passed, name
+        assert {"UNVEIL_GUARD_PROFILE", "UNVEIL_GUARD_WINDOW", "UNVEIL_WATCH_INTERVAL", "UNVEIL_AUDIT_KEY"} <= passed, name
+        assert "UNVEIL_GUARD_MODE" not in passed, name
 
 
-def test_cloud_overlay_requires_login_https_cookies_and_an_enforcing_guard():
+def test_cloud_overlay_requires_login_https_cookies_and_an_audit_key():
     import yaml
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
     overlay = yaml.safe_load((root / "deploy/cloud/docker-compose.cloud.yml").read_text())
     environment = dict(entry.split("=", 1) for entry in overlay["services"]["odysseus"]["environment"])
     assert environment["AUTH_ENABLED"] == "true" and environment["LOCALHOST_BYPASS"] == "false"
-    assert environment["SECURE_COOKIES"] == "true" and environment["UNVEIL_GUARD_MODE"] == "enforce"
+    assert environment["SECURE_COOKIES"] == "true" and "UNVEIL_GUARD_MODE" not in environment
     for required in ("UNVEIL_AUDIT_KEY", "ODYSSEUS_ADMIN_PASSWORD", "ALLOWED_ORIGINS"):
         assert ":?" in environment[required], required
     assert overlay["services"]["caddy"]["ports"] == ["80:80", "443:443", "443:443/udp"]

@@ -53,7 +53,6 @@ services:
       - CHROMADB_PORT=8000
       - DATABASE_URL=${DATABASE_URL:-sqlite:///./data/app.db}
       # UNVEIL security layer. Unset values use the built-in defaults (enforce, standard).
-      - UNVEIL_GUARD_MODE=${UNVEIL_GUARD_MODE:-}
       - UNVEIL_GUARD_PROFILE=${UNVEIL_GUARD_PROFILE:-}
       - UNVEIL_GUARD_WINDOW=${UNVEIL_GUARD_WINDOW:-}
       - UNVEIL_WATCH_INTERVAL=${UNVEIL_WATCH_INTERVAL:-}

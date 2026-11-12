@@ -498,10 +498,8 @@ async def test_build_chat_context_incognito_ignores_saved_session_history(monkey
 async def test_admin_agent_tools_require_admin(monkeypatch, tmp_path):
     auth_mod = _install_core_auth_stub(monkeypatch)
     from src.tool_execution import execute_tool_block
-    # This test is about the application's own admin check, which runs after the
-    # UNVEIL guard; put the guard in observe mode so that check is the one reached.
     from src.unveil_guard import UnveilGuard, reset_guard_for_tests
-    reset_guard_for_tests(UnveilGuard(tmp_path / "guard", key=b"unveil-test-audit-key-0123456789", mode="observe"))
+    reset_guard_for_tests(UnveilGuard(tmp_path / "guard", key=b"unveil-test-audit-key-0123456789"))
 
     class FakeAuth:
         is_configured = True
@@ -520,7 +518,9 @@ async def test_admin_agent_tools_require_admin(monkeypatch, tmp_path):
 
         assert desc == f"{tool_name}: BLOCKED"
         assert result["exit_code"] == 1
-        assert "requires an admin" in result["error"]
+        # A non-admin is refused either by the application's admin check or,
+        # for settings tools, by the UNVEIL guard, which answers first.
+        assert "requires an admin" in result["error"] or result.get("policy") == "unveil_guard"
 
 
 @pytest.mark.asyncio

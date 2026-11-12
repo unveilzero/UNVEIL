@@ -41,7 +41,7 @@ Every tool call an agent makes is checked by ARAD ([agent-runtime-anomaly-detect
 - **Outside tool servers.** Calls to MCP servers are checked too, including scheduled ones that no user started.
 - **Background watch.** A timer re-verifies the audit log, the security files and the tool dispatcher whether or not anyone is signed in. A failure stops all agent actions until an administrator clears it.
 
-Settings: `UNVEIL_GUARD_MODE` (`enforce` or `observe`), `UNVEIL_GUARD_PROFILE` (`standard` or `strict`), `UNVEIL_GUARD_WINDOW` (seconds), `UNVEIL_WATCH_INTERVAL` (seconds), `UNVEIL_AUDIT_KEY`.
+The guard always enforces; there is no setting to turn it off. Settings: `UNVEIL_GUARD_PROFILE` (`standard` or `strict`), `UNVEIL_GUARD_WINDOW` (seconds), `UNVEIL_WATCH_INTERVAL` (seconds), `UNVEIL_AUDIT_KEY`.
 
 The guard runs inside the application process and sees the actions agents take through UNVEIL. It is not an operating-system sandbox or antivirus. For the strongest setup, supply `UNVEIL_AUDIT_KEY` from outside the host and keep the application's own approval settings on.
 

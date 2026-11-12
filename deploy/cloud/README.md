@@ -39,7 +39,7 @@ The start is refused if the domain, the admin password or the audit key is missi
 - Login is required for everything, and there is no loopback bypass.
 - Session cookies are only sent over HTTPS.
 - The app listens on the server's loopback address. Only the HTTPS front door is public.
-- The security layer runs in enforce mode with its audit key supplied from outside the data volume.
+- The security layer always enforces, with its audit key supplied from outside the data volume.
 
 ## On a phone
 

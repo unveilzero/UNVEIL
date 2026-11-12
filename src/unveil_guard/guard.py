@@ -9,10 +9,11 @@ written to a hash-chained audit log.
 This layer is additive. It runs after the application's own request
 authority and approval checks and can only deny, never grant.
 
+The guard always enforces: a BLOCK decision stops the call. There is no
+setting that turns enforcement off.
+
 Configuration (environment):
 
-``UNVEIL_GUARD_MODE``     ``enforce`` (default) or ``observe``. In observe
-                          mode decisions are logged and shown, never enforced.
 ``UNVEIL_GUARD_PROFILE``  ``standard`` (default) or ``strict``.
 ``UNVEIL_GUARD_WINDOW``   Correlation window in seconds (default 300).
 ``UNVEIL_AUDIT_KEY``      Audit log key. If unset, a key file is created in
@@ -146,25 +147,22 @@ def classify(tool: str, content: str) -> tuple[str, ...]:
 
 
 class GuardDecision:
-    __slots__ = ("allowed", "reason", "actions", "enforced")
+    __slots__ = ("allowed", "reason", "actions")
 
-    def __init__(self, allowed: bool, reason: str, actions: tuple[str, ...], enforced: bool):
-        self.allowed, self.reason, self.actions, self.enforced = allowed, reason, actions, enforced
+    def __init__(self, allowed: bool, reason: str, actions: tuple[str, ...]):
+        self.allowed, self.reason, self.actions = allowed, reason, actions
 
     @property
     def blocked(self) -> bool:
-        return self.enforced and not self.allowed
+        return not self.allowed
 
 
 class UnveilGuard:
-    def __init__(self, directory: Optional[Path] = None, *, mode: Optional[str] = None,
+    def __init__(self, directory: Optional[Path] = None, *,
                  profile: Optional[str] = None, window: Optional[float] = None,
                  key: Optional[bytes] = None, clock=time.time):
         self.directory = Path(directory) if directory is not None else _data_dir()
         self.directory.mkdir(parents=True, exist_ok=True)
-        self.mode = (mode or os.getenv("UNVEIL_GUARD_MODE") or "enforce").strip().lower()
-        if self.mode not in {"enforce", "observe"}:
-            raise ValueError("UNVEIL_GUARD_MODE must be 'enforce' or 'observe'")
         self.profile = (profile or os.getenv("UNVEIL_GUARD_PROFILE") or "standard").strip().lower()
         if self.profile not in PROFILES:
             raise ValueError(f"UNVEIL_GUARD_PROFILE must be one of {sorted(PROFILES)}")
@@ -184,7 +182,7 @@ class UnveilGuard:
         self._eval_lock = threading.Lock()
         self._last_timestamp = 0.0
         self._recent: deque[dict] = deque(maxlen=200)
-        self._counts = {"allowed": 0, "blocked": 0, "would_block": 0}
+        self._counts = {"allowed": 0, "blocked": 0}
         self._lockdown: Optional[str] = None
         self.started_at = clock()
 
@@ -225,7 +223,6 @@ class UnveilGuard:
     def check(self, tool: str, content: str, *, owner: Optional[str], session_id: Optional[str],
               system: bool = False, human_approved: bool = False) -> GuardDecision:
         """Decide one tool call. Raises nothing; an internal failure is a BLOCK."""
-        enforced = self.mode == "enforce"
         actions: tuple[str, ...] = ()
         agent = f"system:{owner or 'server'}" if system else f"session:{session_id or 'none'}"
         try:
@@ -233,14 +230,14 @@ class UnveilGuard:
                 try:
                     with self._eval_lock:
                         self.monitor.audit_log.append("runtime_effect_decision", {
-                            "decision": "BLOCK" if enforced else "WOULD_BLOCK", "reason": "lockdown",
+                            "decision": "BLOCK", "reason": "lockdown",
                             "event": {"trace_id": session_id or agent, "agent_id": agent, "action": "LOCKDOWN",
                                       "resource": tool}})
                 except Exception:
                     logger.exception("UNVEIL guard could not record a lockdown refusal")
-                self._remember(tool, actions, "BLOCK" if enforced else "WOULD_BLOCK", "lockdown", agent, session_id, owner)
-                self._counts["blocked" if enforced else "would_block"] += 1
-                return GuardDecision(False, f"lockdown:{self._lockdown}", actions, enforced)
+                self._remember(tool, actions, "BLOCK", "lockdown", agent, session_id, owner)
+                self._counts["blocked"] += 1
+                return GuardDecision(False, f"lockdown:{self._lockdown}", actions)
             actions = classify(tool, content)
             verdict, reason = "ALLOW", "allowed_by_policy"
             present = set(actions)
@@ -270,18 +267,13 @@ class UnveilGuard:
                         if result["decision"] != "ALLOW":
                             verdict, reason = "BLOCK", result["reason"]
                             break
-        except Exception as error:  # in enforce mode an internal failure is a BLOCK
+        except Exception as error:  # an internal failure is a BLOCK
             logger.exception("UNVEIL guard failure")
             verdict, reason = "BLOCK", f"guard_error:{type(error).__name__}"
         allowed = verdict == "ALLOW"
-        if allowed:
-            self._counts["allowed"] += 1
-        elif enforced:
-            self._counts["blocked"] += 1
-        else:
-            self._counts["would_block"] += 1
-        self._remember(tool, actions, verdict if enforced or allowed else "WOULD_BLOCK", reason, agent, session_id, owner)
-        return GuardDecision(allowed, reason, actions, enforced)
+        self._counts["allowed" if allowed else "blocked"] += 1
+        self._remember(tool, actions, verdict, reason, agent, session_id, owner)
+        return GuardDecision(allowed, reason, actions)
 
     # -- reporting --------------------------------------------------------
     def status(self, *, limit: int = 25) -> dict[str, Any]:
@@ -289,7 +281,7 @@ class UnveilGuard:
             recent = list(self._recent)[:limit]
         last_block = next((row for row in recent if row["decision"] == "BLOCK"), None)
         return self.describe({
-            "mode": self.mode, "profile": self.profile, "window_seconds": self.window,
+            "mode": "enforce", "profile": self.profile, "window_seconds": self.window,
             "lockdown": self._lockdown, "counts": dict(self._counts),
             "last_block": last_block, "recent": recent, "started_at": self.started_at,
         })
@@ -298,12 +290,7 @@ class UnveilGuard:
         """Set ``state`` from the lockdown flag and the most recent block in ``report``."""
         last_block = report.get("last_block")
         recent_block = last_block is not None and self._clock() - last_block["at"] < RECENT_BLOCK_SECONDS
-        if report.get("lockdown") or (recent_block and self.mode == "enforce"):
-            report["state"] = "blocked"
-        elif self.mode != "enforce":
-            report["state"] = "observe"
-        else:
-            report["state"] = "cleared"
+        report["state"] = "blocked" if report.get("lockdown") or recent_block else "cleared"
         return report
 
 

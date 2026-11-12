@@ -25,7 +25,6 @@ function summarize(report) {
   if (report.state === 'blocked' && last) {
     return { state: 'blocked', label: 'Blocked', detail: 'Blocked ' + last.tool + ' at ' + timeOf(last.at) + '.' };
   }
-  if (report.state === 'observe') return { state: 'observe', label: 'Observing', detail: 'Decisions are logged but not enforced.' };
   return { state: 'cleared', label: 'Cleared', detail: 'Every agent action is being checked.' };
 }
 
