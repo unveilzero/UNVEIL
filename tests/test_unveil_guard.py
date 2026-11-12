@@ -329,6 +329,9 @@ def test_cloud_overlay_requires_login_https_cookies_and_an_audit_key():
     environment = dict(entry.split("=", 1) for entry in overlay["services"]["odysseus"]["environment"])
     assert environment["AUTH_ENABLED"] == "true" and environment["LOCALHOST_BYPASS"] == "false"
     assert environment["SECURE_COOKIES"] == "true" and "UNVEIL_GUARD_MODE" not in environment
+    assert environment["FORWARDED_ALLOW_IPS"] == "*"
+    base = yaml.safe_load((root / "docker-compose.yml").read_text())["services"]["odysseus"]
+    assert base["ports"] == ["${APP_BIND:-127.0.0.1}:${APP_PORT:-7011}:7000"]
     for required in ("UNVEIL_AUDIT_KEY", "ODYSSEUS_ADMIN_PASSWORD", "ALLOWED_ORIGINS"):
         assert ":?" in environment[required], required
     assert overlay["services"]["caddy"]["ports"] == ["80:80", "443:443", "443:443/udp"]

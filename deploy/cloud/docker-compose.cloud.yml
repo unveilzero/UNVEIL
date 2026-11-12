@@ -13,6 +13,8 @@ services:
       - AUTH_ENABLED=true
       - LOCALHOST_BYPASS=false
       - SECURE_COOKIES=true
+      # Only the front door can reach the app, so its report of the visitor's address is trusted.
+      - FORWARDED_ALLOW_IPS=*
       - ALLOWED_ORIGINS=https://${UNVEIL_DOMAIN:?Set UNVEIL_DOMAIN in deploy/cloud/.env}
       - OAUTH_REDIRECT_BASE_URL=https://${UNVEIL_DOMAIN}
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:?Set ODYSSEUS_ADMIN_PASSWORD in deploy/cloud/.env}
