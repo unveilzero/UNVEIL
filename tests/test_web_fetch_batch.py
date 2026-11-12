@@ -29,7 +29,7 @@ def test_web_fetch_batch_is_concurrent_bounded_and_source_separated(monkeypatch)
     assert result["requested"] == 2
     assert "## URL 1: https://example.com/a" in result["output"]
     assert "## URL 2: https://example.com/b" in result["output"]
-    assert "[...batch item truncated]" in result["output"]
+    assert "[...batch item truncated at 4,500 characters" in result["output"]
 
 
 def test_web_fetch_batch_rejects_empty_or_oversized_lists():

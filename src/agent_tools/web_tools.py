@@ -18,7 +18,7 @@ import urllib.parse
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from core import platform_compat
 from src import browser_lifecycle, process_lifecycle
@@ -442,6 +442,8 @@ class WebSearchTool:
 class WebFetchTool:
     _MAX_BATCH_URLS = 12
     _MAX_BATCH_CONCURRENCY = 4
+    _MAX_FOCUSED_PASSAGES = 4
+    _STRUCTURED_MIN_CHARS = 3000
 
     @staticmethod
     def _query_from_request(request_text: str) -> str:
@@ -570,21 +572,149 @@ class WebFetchTool:
                 else:
                     passage = passage[:passage_cap]
                 passage += "\n[...passage windowed around query terms]"
-            ranked_passages.append((score, start, passage))
+            ranked_passages.append((score, start, end, passage))
         ranked_passages.sort(key=lambda item: (-item[0], item[1]))
-        passages: list[str] = []
-        for _score, _index, passage in ranked_passages:
-            # Collapse duplicate/near-identical windows without merging them.
-            normalized = re.sub(r"\s+", " ", passage).strip()
-            if any(normalized in re.sub(r"\s+", " ", prior) for prior in passages):
-                continue
-            passages.append(passage)
-            if len(passages) >= 1:
-                break
-        selected = "\n\n--- matching passage ---\n\n".join(passages)
+
+        # The best passage always leads the selection. After it, passages that
+        # cover query terms nothing chosen yet covers come first, then the next
+        # best, so a page that states the same rows twice (for example a
+        # standard table and a discounted one) shows both instead of only the
+        # denser one. Everything chosen fits the budget whole; nothing is cut.
+        def _covered(passage_text: str) -> set[str]:
+            passage_low = passage_text.casefold()
+            return {term for term in terms if term.casefold() in passage_low}
+
+        def _overlaps(start: int, end: int, chosen_items: list[tuple[int, int, str]]) -> bool:
+            for other_start, other_end, _text in chosen_items:
+                shared = min(end, other_end) - max(start, other_start)
+                if shared > 0 and shared * 2 >= min(end - start, other_end - other_start):
+                    return True
+            return False
+
+        chosen: list[tuple[int, int, str]] = []
+        seen_terms: set[str] = set()
+        skipped = 0
+        budget = max_chars
+        for coverage_pass in (True, False):
+            for _score, start, end, passage in ranked_passages:
+                if len(chosen) >= WebFetchTool._MAX_FOCUSED_PASSAGES:
+                    break
+                normalized = re.sub(r"\s+", " ", passage).strip()
+                if any(normalized in re.sub(r"\s+", " ", prior) for _s, _e, prior in chosen):
+                    continue
+                if chosen and _overlaps(start, end, chosen):
+                    continue
+                new_terms = _covered(passage) - seen_terms
+                if coverage_pass and chosen and not new_terms:
+                    continue
+                cost = len(passage) + 60
+                if chosen and cost > budget:
+                    if not coverage_pass:
+                        skipped += 1
+                    continue
+                chosen.append((start, end, passage))
+                seen_terms |= new_terms
+                budget -= cost
+        chosen.sort(key=lambda item: item[0])
+        if len(chosen) == 1:
+            selected = chosen[0][2]
+        else:
+            selected = "\n\n".join(
+                f"--- matching passage {number} of {len(chosen)} · lines {start + 1}-{end} ---\n{passage}"
+                for number, (start, end, passage) in enumerate(chosen, start=1)
+            )
         if len(selected) > max_chars:
             selected = selected[:max_chars] + "\n\n[...focused passages truncated]"
-        return f"[Focused passages for: {query}]\n\n{selected}"
+        notes = []
+        missing = [term for term in terms if term not in seen_terms]
+        if missing:
+            notes.append("no match on this page for: " + ", ".join(missing))
+        if skipped:
+            notes.append(f"{skipped} more matching passage(s) not shown; narrow the query to see them")
+        footer = ("\n\n[" + "; ".join(notes) + "]") if notes else ""
+        return f"[Focused passages for: {query}]\n\n{selected}{footer}"
+
+    @staticmethod
+    def _structured_view(text: str, query: str, max_chars: int) -> Optional[str]:
+        """Render a JSON body as ``path: value`` lines, shallowest fields first.
+
+        Raw API JSON spends most of its length on link fields and nested copies
+        of related objects, so a head cut loses top-level fields that sit after
+        them. Listing fields by depth keeps the object's own fields ahead of its
+        nested relatives, and a query narrows the listing to matching fields.
+        Returns None when the body is not JSON or is short enough to send as is.
+        """
+        stripped = text.lstrip()
+        if not stripped or stripped[0] not in "{[":
+            return None
+        if not query and len(text) <= WebFetchTool._STRUCTURED_MIN_CHARS:
+            return None
+        try:
+            data = json.loads(text)
+        except (ValueError, RecursionError):
+            return None
+        if not isinstance(data, (dict, list)):
+            return None
+
+        rows: list[tuple[int, str, str]] = []
+        pending: list[tuple[str, Any, int]] = [("", data, 0)]
+        while pending and len(rows) < 5000:
+            path, value, depth = pending.pop(0)
+            if isinstance(value, dict):
+                for key, child in value.items():
+                    pending.append((f"{path}.{key}" if path else str(key), child, depth + 1))
+            elif isinstance(value, list):
+                for index, child in enumerate(value):
+                    pending.append((f"{path}[{index}]", child, depth + 1))
+            else:
+                rendered = json.dumps(value, ensure_ascii=False)
+                if len(rendered) > 400:
+                    rendered = rendered[:400] + "…"
+                rows.append((depth, path, rendered))
+        total = len(rows)
+
+        terms = [
+            term.casefold()
+            for term in re.findall(r"[A-Za-z0-9][A-Za-z0-9_.+-]{1,}", query or "")
+        ]
+        notes: list[str] = []
+        if terms:
+            kept = [row for row in rows if any(term in f"{row[1]}: {row[2]}".casefold() for term in terms)]
+            unmatched = [
+                term for term in terms
+                if not any(term in f"{row[1]}: {row[2]}".casefold() for row in kept)
+            ]
+            if not kept:
+                return None
+            if unmatched:
+                notes.append("no field matched: " + ", ".join(unmatched))
+            notes.append(f"{len(kept)} of {total} fields shown; the rest did not match the query")
+        else:
+            kept = [
+                row for row in rows
+                if not (
+                    row[1].casefold().endswith("url")
+                    and row[2].startswith(('"http://', '"https://'))
+                )
+            ]
+            links = total - len(kept)
+            if links:
+                notes.append(f"{links} link fields ending in url omitted; put url in the query to list them")
+
+        lines: list[str] = []
+        used = 0
+        for _depth, path, rendered in kept:
+            line = f"{path}: {rendered}"
+            if used + len(line) + 1 > max_chars - 200:
+                notes.append(
+                    f"{len(kept) - len(lines)} deeper fields not shown; re-call with a query naming the fields you need"
+                )
+                break
+            lines.append(line)
+            used += len(line) + 1
+        label = f"[JSON fields matching: {query}]" if terms else "[JSON fields, shallowest first]"
+        footer = ("\n\n[" + "; ".join(notes) + "]") if notes else ""
+        return label + "\n" + "\n".join(lines) + footer
 
     async def _execute_batch(self, payload: dict, ctx: dict) -> dict:
         """Fetch several known URLs concurrently with bounded combined output."""
@@ -645,7 +775,11 @@ class WebFetchTool:
             else:
                 body = "ERROR: " + str(result.get("error") or "fetch failed")
             if len(body) > per_item_cap:
-                body = body[:per_item_cap] + "\n[...batch item truncated]"
+                body = (
+                    body[:per_item_cap]
+                    + f"\n[...batch item truncated at {per_item_cap:,} characters; "
+                    "fetch this URL on its own or add query terms to see the rest]"
+                )
             sections.append(f"## URL {index}: {request['url']}\n{body}")
             summaries.append({
                 "url": request["url"],
@@ -805,8 +939,12 @@ class WebFetchTool:
         if len(title) > 300:
             title = title[:300] + "..."
         header = (f"# {title}\n" if title else "") + f"Source: {url}\n\n"
-        if query:
-            text = self._focused_passages(text, query, MAX_OUTPUT_CHARS - len(header) - 500)
+        body_budget = MAX_OUTPUT_CHARS - len(header) - 500
+        structured = self._structured_view(text, query, body_budget)
+        if structured is not None:
+            text = structured
+        elif query:
+            text = self._focused_passages(text, query, body_budget)
         output = size_note + header + text
         if len(output) > MAX_OUTPUT_CHARS:
             output = output[:MAX_OUTPUT_CHARS] + (
