@@ -55,10 +55,14 @@ chats only.
 
 ## Where agent commands run
 
-Commands an agent runs are started in their own empty room: no application
-files, no data directory and no settings, only that chat's workspace. If the
-room cannot be created, the command is refused. To see what a command can
-reach on your server:
+Commands an agent runs do not run inside the app. They are handed to a second
+container, the command room, which is given the agent workspace and nothing
+else: no data directory, no database, no keys and none of the app's settings.
+Each command also gets its own private space inside that container. If the
+room is missing or cannot do this, the command is refused.
+
+`update.sh` creates the secret the app and the room share. To see what a
+command can reach on your server:
 
 ```bash
 bash deploy/cloud/check-box.sh

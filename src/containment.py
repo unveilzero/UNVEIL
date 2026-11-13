@@ -328,6 +328,78 @@ def _posix_group_available() -> bool:
     return not IS_WINDOWS
 
 
+# ── The command room ────────────────────────────────────────────────────────
+# A separate container that holds nothing but the chat workspaces. When one is
+# configured the command is handed to it and runs there, inside a private
+# namespace; this process only relays input and output. See src/command_room.
+ROOM_MECHANISM = "command_room"
+_ROOM_CLIENT = str(Path(__file__).resolve().parent / "command_room" / "client.py")
+_ROOM_OK_TTL_S = 30.0
+_ROOM_FAIL_TTL_S = 5.0
+_room_state: dict[str, Any] = {"checked": 0.0, "answer": None, "key": None}
+
+
+def _room_settings() -> Optional[tuple[str, str]]:
+    url = os.environ.get("UNVEIL_ROOM_URL", "").strip()
+    token = os.environ.get("UNVEIL_ROOM_TOKEN", "").strip()
+    return (url, token) if url and token else None
+
+
+def _room_answer() -> Optional[dict[str, Any]]:
+    """What the room last said it can do, re-asked when the answer is stale."""
+    settings = _room_settings()
+    if settings is None:
+        return None
+    now = time.monotonic()
+    answer = _room_state["answer"]
+    ttl = _ROOM_OK_TTL_S if answer else _ROOM_FAIL_TTL_S
+    if _room_state["key"] == settings and now - _room_state["checked"] < ttl:
+        return answer
+    try:
+        from src.command_room import client as room_client
+        answer = room_client.ping(*settings)
+    except Exception:
+        logger.warning("containment: command room check failed", exc_info=True)
+        answer = None
+    if not (isinstance(answer, dict) and answer.get("room")):
+        answer = None
+    _room_state.update(checked=now, answer=answer, key=settings)
+    return answer
+
+
+def _room_available() -> bool:
+    return not IS_WINDOWS and _room_answer() is not None
+
+
+def _room_provides(spec: ContainmentSpec) -> frozenset[str]:
+    # The room builds the same private root and PID namespace bubblewrap does,
+    # in a container that has no application data to begin with. It is only
+    # claimed for a workspace the room was actually given, and never when the
+    # spec asks for extra writable folders, which the room does not honour.
+    answer = _room_answer()
+    if answer is None or spec.writable_extra:
+        return frozenset({WALL_CLOCK})
+    workspace = os.path.realpath(spec.workspace)
+    roots = [str(root) for root in answer.get("workspaces") or []]
+    if not any(workspace == root or workspace.startswith(root + os.sep) for root in roots):
+        return frozenset({WALL_CLOCK})
+    provided = {FILESYSTEM, PROCESS_TREE, WALL_CLOCK}
+    if spec.network == NETWORK_NONE:
+        provided.add(NETWORK)
+    return frozenset(provided)
+
+
+def _spawn_env(grant: ContainmentGrant) -> dict[str, str]:
+    """The environment of the process this backend starts for a grant."""
+    env = dict(grant.spec.env)
+    if grant.mechanism == ROOM_MECHANISM:
+        # Read by the relay only. The relay does not pass either value on, and
+        # the command itself never runs in this process's environment.
+        url, token = _room_settings() or ("", "")
+        env.update(UNVEIL_ROOM_URL=url, UNVEIL_ROOM_TOKEN=token)
+    return env
+
+
 def _windows_available() -> bool:
     return IS_WINDOWS
 
@@ -415,6 +487,7 @@ def _windows_provides(spec: ContainmentSpec) -> frozenset[str]:
 #: MODE_ENFORCING). Tests substitute this list to drive selection
 #: deterministically without needing a real sandbox.
 MECHANISMS: tuple[Mechanism, ...] = (
+    Mechanism(ROOM_MECHANISM, 40, _room_available, _room_provides),
     Mechanism("bubblewrap", 30, _bwrap_available, _bwrap_provides),
     Mechanism("process_group", 20, _posix_group_available, _posix_group_provides),
     Mechanism("windows_tree", 10, _windows_available, _windows_provides),
@@ -921,7 +994,7 @@ def _launch_argv(grant: ContainmentGrant, command: Any, *, argv: bool,
         text = str(command or "")
         if not text.strip():
             raise ValueError("containment: empty command")
-        if grant.mechanism == "bubblewrap":
+        if grant.mechanism in ("bubblewrap", ROOM_MECHANISM):
             # The namespace brings its own /bin/bash via the read-only /usr.
             parts = ["/bin/bash", "-lc", text]
         else:
@@ -943,6 +1016,13 @@ def _launch_argv(grant: ContainmentGrant, command: Any, *, argv: bool,
                      "ody-boundary", ready_marker, *parts]
         info_args = ["--info-fd", str(info_fd)] if info_fd is not None else []
         return _bwrap_prefix(spec) + info_args + parts
+    if grant.mechanism == ROOM_MECHANISM:
+        relay = [sys.executable or "python3", "-I", _ROOM_CLIENT,
+                 "--workspace", spec.workspace, "--timeout", str(int(spec.wall_clock_s)),
+                 "--network", spec.network]
+        for path in spec.readonly_extra:
+            relay += ["--readonly", path]
+        return relay + ["--", *parts]
     return parts
 
 
@@ -1052,7 +1132,7 @@ async def run(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=spec.workspace,
-            env=dict(spec.env),
+            env=_spawn_env(grant),
             **spawn_kwargs,
         ))
         try:

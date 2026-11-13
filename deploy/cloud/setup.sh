@@ -34,12 +34,14 @@ fi
 
 ADMIN_PASSWORD="$(openssl rand -base64 24 | tr -d '/+=' | cut -c1-24)"
 AUDIT_KEY="$(openssl rand -hex 32)"
+ROOM_TOKEN="$(openssl rand -hex 32)"
 
 umask 077
 cat > "$ENV_FILE" <<ENV
 UNVEIL_DOMAIN=$DOMAIN
 ODYSSEUS_ADMIN_PASSWORD=$ADMIN_PASSWORD
 UNVEIL_AUDIT_KEY=$AUDIT_KEY
+UNVEIL_ROOM_TOKEN=$ROOM_TOKEN
 ENV
 chmod 600 "$ENV_FILE"
 

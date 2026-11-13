@@ -23,6 +23,44 @@ services:
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:?Set ODYSSEUS_ADMIN_PASSWORD in deploy/cloud/.env}
       # Security layer: enforced, with the audit key supplied from outside the data volume.
       - UNVEIL_AUDIT_KEY=${UNVEIL_AUDIT_KEY:?Set UNVEIL_AUDIT_KEY in deploy/cloud/.env}
+      # Commands an agent runs are handed to the command room below. Without
+      # the secret the room is not used and commands are refused as before.
+      - UNVEIL_ROOM_URL=room:7070
+      - UNVEIL_ROOM_TOKEN=${UNVEIL_ROOM_TOKEN:-}
+    networks:
+      - default
+      - room
+
+  # The command room: a separate container where agent commands run. It is
+  # given the agent workspace and nothing else: no data directory, no
+  # database, no keys, none of the app's settings. Its restrictions are relaxed
+  # only so it can build a private namespace around each command; the app's
+  # own container is not relaxed.
+  room:
+    image: ${ODYSSEUS_IMAGE:-unveil-local:latest}
+    pull_policy: never
+    restart: unless-stopped
+    entrypoint: ["python", "-I", "/app/src/command_room/server.py"]
+    user: "${PUID:-1000}:${PGID:-1000}"
+    environment:
+      - UNVEIL_ROOM_TOKEN=${UNVEIL_ROOM_TOKEN:-}
+      - UNVEIL_ROOM_WORKSPACES=/app/data/agent_workspace
+    volumes:
+      - ${APP_DATA_DIR:-./data}/agent_workspace:/app/data/agent_workspace:z
+    networks:
+      - room
+    security_opt:
+      - seccomp=unconfined
+      - apparmor=unconfined
+      - systempaths=unconfined
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp
+    mem_limit: 1g
+    pids_limit: 512
+    cpus: 1.0
 
   caddy:
     image: docker.io/library/caddy:2-alpine
@@ -42,6 +80,9 @@ services:
       - caddy_config:/config
     depends_on:
       - odysseus
+
+networks:
+  room:
 
 volumes:
   caddy_data:

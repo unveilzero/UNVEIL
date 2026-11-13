@@ -99,7 +99,7 @@ _HOST_PROBE_PATTERN = re.compile(
 # mode is configured.
 _PROTECTED_PATTERN = re.compile(
     r"(unveil_guard|unveil_security_routes|tool_execution\.py|mcp_manager\.py|auth\.json|audit\.key|"
-    r"guard_audit\.jsonl|audit_anchor\.json|UNVEIL_GUARD_|UNVEIL_AUDIT_KEY|UNVEIL_WATCH_)",
+    r"guard_audit\.jsonl|audit_anchor\.json|UNVEIL_GUARD_|UNVEIL_AUDIT_KEY|UNVEIL_WATCH_|UNVEIL_ROOM_|command_room)",
     re.IGNORECASE,
 )
 _APP_ROOT = str(Path(__file__).resolve().parents[2])
