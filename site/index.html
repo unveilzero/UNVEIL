@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>UNVEIL</title>
-<meta name="description" content="A workspace where people and AI agents work together. A person stays in charge, and a guard that cannot be switched off checks every action before it runs.">
+<meta name="description" content="A workspace where people and AI agents work together. A guard that cannot be switched off checks every action before it runs.">
 <meta property="og:title" content="UNVEIL">
-<meta property="og:description" content="A workspace where people and AI agents work together. A person stays in charge, and a guard that cannot be switched off checks every action before it runs.">
+<meta property="og:description" content="A workspace where people and AI agents work together. A guard that cannot be switched off checks every action before it runs.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#04060b">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
 <style>
 /* Layout: a short opening statement, then one pinned 3D model of the app whose
    check layers pull apart as the reader scrolls, each step captioned beside it.
@@ -22,6 +22,7 @@
   --ink: #dce7f9;
   --muted: #8296b5;
   --blue: #4a8df8;
+  --brand: #1e9bff;
   --ok: #4ade80;
   --stop: #f05252;
   --display: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
@@ -63,7 +64,7 @@ a:focus-visible, button:focus-visible, textarea:focus-visible {
 
 /* opening */
 .hero { padding-block: 56px 40px; }
-.mark { display: flex; align-items: center; gap: 18px; }
+.mark { display: flex; align-items: center; justify-content: center; gap: 18px; }
 .status {
   width: 44px; height: 44px; flex: none;
   border: 1.5px solid var(--ok);
@@ -71,21 +72,28 @@ a:focus-visible, button:focus-visible, textarea:focus-visible {
   display: grid; place-items: center;
 }
 .status i { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 14px var(--ok); }
+/* The title matches the app's own: same face, weight, spacing and blue gradient. */
 h1 {
-  font-family: var(--display);
-  font-weight: 700;
+  font-family: "Fira Code", var(--display);
+  font-weight: 600;
   font-size: clamp(44px, 11vw, 104px);
-  letter-spacing: 0.14em;
-  line-height: 1;
+  letter-spacing: 0.04em;
+  line-height: 1.1;
   margin: 0;
+  color: var(--brand);
+  background: linear-gradient(135deg, var(--brand), color-mix(in srgb, var(--brand) 60%, var(--ink)));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 .hero p.lede {
   max-width: 34em;
   font-size: clamp(18px, 2.4vw, 22px);
-  margin: 28px 0 0;
+  margin: 28px auto 0;
+  text-align: center;
 }
-.hero .hint { margin-top: 28px; display: flex; align-items: center; gap: 10px; }
-.hero .hint::before { content: ""; width: 28px; height: 1px; background: var(--muted); }
+.hero .hint { margin-top: 28px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+.hero .hint::before, .hero .hint::after { content: ""; width: 28px; height: 1px; background: var(--muted); }
 
 /* pinned model + steps */
 .story { position: relative; }
@@ -180,8 +188,8 @@ footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted
     <span class="status" aria-hidden="true"><i></i></span>
     <h1>UNVEIL</h1>
   </div>
-  <p class="lede">A workspace where people and AI agents work together. A person stays in charge, and a guard that cannot be switched off checks every action before it runs.</p>
-  <div class="hint label">Scroll to follow one action through the checks</div>
+  <p class="lede">A workspace where people and AI agents work together. A guard that cannot be switched off checks every action before it runs.</p>
+  <div class="hint label">Scroll to follow the action</div>
 </header>
 
 <section class="story" aria-label="How an action is checked">
@@ -229,7 +237,7 @@ footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted
         <h2>All of it sits inside one app</h2>
         <p>Works in a browser and installs to a phone home screen.</p>
         <a class="applink" href="https://app.unveilresearch.com">app.unveilresearch.com</a>
-        <p class="access">Access is by invitation only. Public sign ups, coming soon.</p>
+        <p class="access">Access by invitation only. Public sign ups, coming soon.</p>
       </div>
     </article>
   </div>
