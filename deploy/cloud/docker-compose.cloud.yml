@@ -30,8 +30,11 @@ services:
       - "443:443/udp"
     environment:
       - UNVEIL_DOMAIN=${UNVEIL_DOMAIN}
+      # Optional public website address; unset keeps the website off the internet.
+      - UNVEIL_SITE_DOMAIN=${UNVEIL_SITE_DOMAIN:-http://site.localhost}
     volumes:
       - ./deploy/cloud/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/srv/site:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:

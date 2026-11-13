@@ -15,3 +15,20 @@
 		flush_interval -1
 	}
 }
+
+# The public website (the files in site/). UNVEIL_SITE_DOMAIN is optional; when
+# it is not set this block answers on a local-only name and nothing is public.
+{$UNVEIL_SITE_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	root * /srv/site
+	file_server
+}

@@ -45,6 +45,13 @@ The start is refused if the domain, the admin password or the audit key is missi
 
 Open the address in the phone's browser and choose "Add to Home Screen". UNVEIL then opens full screen from its own icon. The agents and the security layer keep running on the server when the phone is closed.
 
+## Public website
+
+The page in `site/` can be served from the same server. Point the website's
+DNS record at this server, add `UNVEIL_SITE_DOMAIN` to `deploy/cloud/.env`
+(see `.env.example`), and start again with the command above. Leave it unset
+and the website stays off the internet.
+
 ## Updating
 
 ```bash

@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>UNVEIL</title>
+<meta name="description" content="A workspace where people and AI agents work together. A person stays in charge, and a guard that cannot be switched off checks every action before it runs.">
+<meta property="og:title" content="UNVEIL">
+<meta property="og:description" content="A workspace where people and AI agents work together. A person stays in charge, and a guard that cannot be switched off checks every action before it runs.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#04060b">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+/* Layout: a short opening statement, then one pinned 3D model of the app whose
+   check layers pull apart as the reader scrolls, each step captioned beside it.
+   Single dark look on purpose, matching the app (black and blue, green cleared, red blocked). */
+:root {
+  color-scheme: dark;
+  --bg: #04060b;
+  --panel: #0a101b;
+  --line: #1b3050;
+  --ink: #dce7f9;
+  --muted: #8296b5;
+  --blue: #4a8df8;
+  --ok: #4ade80;
+  --stop: #f05252;
+  --display: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--body);
+  font-size: 17px;
+  line-height: 1.6;
+}
+a { color: var(--blue); }
+a:focus-visible, button:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 3px;
+}
+.wrap {
+  max-width: 1080px;
+  margin-inline: auto;
+  padding-left: max(20px, env(safe-area-inset-left, 0px));
+  padding-right: max(20px, env(safe-area-inset-right, 0px));
+}
+.label {
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* falling rain behind everything, the same effect as the app's sign-in screen */
+#rain { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; }
+.hero, .story, .band, footer { position: relative; z-index: 1; }
+
+/* opening */
+.hero { padding-block: 56px 40px; }
+.mark { display: flex; align-items: center; gap: 18px; }
+.status {
+  width: 44px; height: 44px; flex: none;
+  border: 1.5px solid var(--ok);
+  border-radius: 50%;
+  display: grid; place-items: center;
+}
+.status i { width: 10px; height: 10px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 14px var(--ok); }
+h1 {
+  font-family: var(--display);
+  font-weight: 700;
+  font-size: clamp(44px, 11vw, 104px);
+  letter-spacing: 0.14em;
+  line-height: 1;
+  margin: 0;
+}
+.hero p.lede {
+  max-width: 34em;
+  font-size: clamp(18px, 2.4vw, 22px);
+  margin: 28px 0 0;
+}
+.hero .hint { margin-top: 28px; display: flex; align-items: center; gap: 10px; }
+.hero .hint::before { content: ""; width: 28px; height: 1px; background: var(--muted); }
+
+/* pinned model + steps */
+.story { position: relative; }
+.stage {
+  position: sticky;
+  top: 0;
+  height: 100vh; height: 100svh;
+  overflow: hidden;
+}
+.stage canvas { display: block; width: 100%; height: 100%; }
+.stage .nogl {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--muted); font-family: var(--display); font-size: 13px; text-align: center; padding: 24px;
+}
+.steps { position: relative; margin-top: -100vh; margin-top: -100svh; pointer-events: none; }
+.step {
+  min-height: 100vh; min-height: 100svh;
+  display: flex;
+  align-items: center;
+}
+.step .card {
+  pointer-events: auto;
+  width: min(100%, 400px);
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 22px 24px 24px;
+  backdrop-filter: blur(6px);
+}
+.step h2 {
+  font-family: var(--display);
+  font-size: clamp(20px, 2.6vw, 26px);
+  font-weight: 700;
+  line-height: 1.25;
+  margin: 10px 0 10px;
+  text-wrap: balance;
+}
+.step p { margin: 0; color: var(--ink); }
+.step p + p { margin-top: 10px; }
+.step .label b { color: var(--blue); font-weight: 500; }
+.step.guard .label b { color: var(--stop); }
+.step.open { justify-content: center; text-align: center; }
+.step.open .card { width: min(100%, 440px); padding: 28px 24px 30px; }
+.applink {
+  display: inline-block;
+  margin-top: 18px;
+  font-family: var(--display);
+  font-size: clamp(16px, 4.2vw, 21px);
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--ok);
+  text-decoration: none;
+  padding: 14px 20px;
+  border-radius: 4px;
+  overflow-wrap: anywhere;
+}
+.applink:hover { filter: brightness(1.1); }
+.step p.access { margin-top: 16px; font-size: 14px; color: var(--muted); }
+@media (max-width: 760px) {
+  .step { align-items: flex-end; padding-bottom: 28px; }
+  .step.open { align-items: center; padding-bottom: 0; }
+  .step .card { width: 100%; padding: 16px 18px 18px; }
+  body { font-size: 16px; }
+}
+
+/* lower sections */
+.band { border-top: 1px solid var(--line); padding-block: 72px; background: color-mix(in srgb, var(--bg) 78%, transparent); }
+.band h2 {
+  font-family: var(--display);
+  font-size: clamp(24px, 3.4vw, 34px);
+  line-height: 1.2;
+  margin: 12px 0 18px;
+  text-wrap: balance;
+}
+.band p { max-width: 62ch; margin: 0 0 14px; }
+.principles { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 28px; margin-top: 34px; padding: 0; list-style: none; }
+.principles li { border-top: 2px solid var(--blue); padding-top: 14px; min-width: 0; }
+.principles strong { font-family: var(--display); font-size: 15px; display: block; margin-bottom: 6px; }
+.principles span { color: var(--muted); font-size: 15px; }
+
+
+footer { border-top: 1px solid var(--line); padding-block: 48px 64px; background: color-mix(in srgb, var(--bg) 78%, transparent); }
+footer .still { font-family: var(--display); font-size: clamp(17px, 2.4vw, 21px); max-width: 30em; margin: 0 0 24px; line-height: 1.45; }
+footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted); font-size: 14px; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+<canvas id="rain" aria-hidden="true"></canvas>
+<header class="hero wrap">
+  <div class="mark">
+    <span class="status" aria-hidden="true"><i></i></span>
+    <h1>UNVEIL</h1>
+  </div>
+  <p class="lede">A workspace where people and AI agents work together. A person stays in charge, and a guard that cannot be switched off checks every action before it runs.</p>
+  <div class="hint label">Scroll to follow one action through the checks</div>
+</header>
+
+<section class="story" aria-label="How an action is checked">
+  <div class="stage" id="stage"><canvas id="scene" aria-hidden="true"></canvas></div>
+  <div class="steps wrap">
+    <article class="step" data-step="0">
+      <div class="card">
+        <div class="label"><b>Start</b> · the app</div>
+        <h2>An agent wants to do something</h2>
+        <p>Read a file. Open a web page. Run a command. In UNVEIL every one of these starts as a request. Nothing runs yet.</p>
+      </div>
+    </article>
+    <article class="step" data-step="1">
+      <div class="card">
+        <div class="label"><b>Check 1</b> · the request</div>
+        <h2>Does it match what you asked for?</h2>
+        <p>The app compares the action with the task you gave. An agent that reaches for something outside the task is refused here.</p>
+      </div>
+    </article>
+    <article class="step" data-step="2">
+      <div class="card">
+        <div class="label"><b>Check 2</b> · you</div>
+        <h2>You say yes or no</h2>
+        <p>Actions that touch your files, your accounts or the outside world wait for your approval. You can allow once, allow for the session, or deny.</p>
+      </div>
+    </article>
+    <article class="step guard" data-step="3">
+      <div class="card">
+        <div class="label"><b>Check 3</b> · UNVEIL guard</div>
+        <h2>The guard checks last, even after a yes</h2>
+        <p>Before anything runs, the guard looks at the action itself for signs of misuse or malware. If it finds them, the action is blocked, whatever was approved before it.</p>
+        <p>The guard can only say no. It has no off switch.</p>
+      </div>
+    </article>
+    <article class="step" data-step="4">
+      <div class="card">
+        <div class="label"><b>Always on</b> · background watch</div>
+        <h2>It keeps watching when you are away</h2>
+        <p>The guard re-checks the workspace every 60 seconds, with or without anyone signed in, and every decision is written to a signed record.</p>
+      </div>
+    </article>
+    <article class="step open" data-step="5">
+      <div class="card">
+        <div class="label">The app</div>
+        <h2>All of it sits inside one app</h2>
+        <p>Works in a browser and installs to a phone home screen.</p>
+        <a class="applink" href="https://app.unveilresearch.com">app.unveilresearch.com</a>
+        <p class="access">Access is by invitation only. Public sign ups, coming soon.</p>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="band">
+  <div class="wrap">
+    <div class="label">Why we built it</div>
+    <h2>Agents can act on their own now. The safety around them should not be optional.</h2>
+    <p>AI agents read files, browse the web and run commands without a person typing each step. On most platforms the protection around that is a settings page, and settings get turned off.</p>
+    <p>UNVEIL puts the protection in the core. The aim is a place where people and agents work together, not against each other, with human judgment as the final authority.</p>
+    <ul class="principles">
+      <li><strong>Human authority</strong><span>No agent can change the app, change logins, or act without a person authorizing it.</span></li>
+      <li><strong>Always enforced</strong><span>The guard has one mode. There is no observe-only setting and no way to turn blocking off.</span></li>
+      <li><strong>On the record</strong><span>Every decision the guard makes, allowed or blocked, is written to a signed record.</span></li>
+    </ul>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="still">UNVEIL is not finished. We are still researching, testing and building, and this page will change as the work does.</p>
+    <div class="meta">
+      <span>UNVEIL Research Center LLC and Zero</span>
+      <a href="https://app.unveilresearch.com">Open the app</a>
+    </div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  // rain: thin streaks falling, as on the app's sign-in screen
+  (function () {
+    var rc = document.getElementById('rain');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) { rc.hidden = true; return; }
+    var ctx = rc.getContext('2d'), dpr = Math.min(window.devicePixelRatio || 1, 2), RW, RH, drops = [];
+    function size() { RW = window.innerWidth; RH = window.innerHeight; rc.width = RW * dpr; rc.height = RH * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
+    size(); window.addEventListener('resize', size);
+    function draw() {
+      requestAnimationFrame(draw);
+      ctx.clearRect(0, 0, RW, RH);
+      if (drops.length < 110 && Math.random() < 0.55) {
+        var len = 20 + Math.random() * 40;
+        drops.push({ x: Math.random() * RW, y: -len, len: len, speed: 4 + Math.random() * 8, alpha: 0.2 + Math.random() * 0.25 });
+      }
+      ctx.lineWidth = 1.3;
+      for (var i = drops.length - 1; i >= 0; i--) {
+        var d = drops[i]; d.y += d.speed;
+        if (d.y > RH + d.len) { drops.splice(i, 1); continue; }
+        var g = ctx.createLinearGradient(d.x, d.y - d.len, d.x, d.y);
+        g.addColorStop(0, 'rgba(74,141,248,0)'); g.addColorStop(1, 'rgba(74,141,248,1)');
+        ctx.strokeStyle = g; ctx.globalAlpha = d.alpha;
+        ctx.beginPath(); ctx.moveTo(d.x, d.y - d.len); ctx.lineTo(d.x, d.y); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+    draw();
+  })();
+
+  var stage = document.getElementById('stage');
+  var canvas = document.getElementById('scene');
+  var story = document.querySelector('.story');
+  if (!window.THREE) { return fail(); }
+  var renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+  } catch (err) { return fail(); }
+  function fail() {
+    var d = document.createElement('div');
+    d.className = 'nogl';
+    d.textContent = 'The 3D view could not start in this browser. The steps below still describe each check.';
+    stage.appendChild(d);
+  }
+
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var BLUE = new THREE.Color(0x4a8df8), OK = new THREE.Color(0x4ade80), STOP = new THREE.Color(0xf05252);
+  var scene = new THREE.Scene();
+  var camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
+  camera.position.set(0, 0, 13);
+  var rig = new THREE.Group();
+  scene.add(rig);
+
+  var W = 2.1, H = 4.2;
+  function rounded(ctx, x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+  }
+  function tex(draw) {
+    var c = document.createElement('canvas'); c.width = 512; c.height = 1024;
+    var ctx = c.getContext('2d'); draw(ctx);
+    var t = new THREE.CanvasTexture(c); t.anisotropy = 4; return t;
+  }
+  var MONO = '"JetBrains Mono", ui-monospace, Menlo, monospace';
+
+  // the app screen (back of the stack)
+  function drawApp(ctx) {
+    rounded(ctx, 6, 6, 500, 1012, 46); ctx.fillStyle = '#070c15'; ctx.fill();
+    ctx.lineWidth = 5; ctx.strokeStyle = '#27456f'; ctx.stroke();
+    ctx.strokeStyle = '#4ade80'; ctx.lineWidth = 4; ctx.beginPath(); ctx.arc(70, 84, 26, 0, 7); ctx.stroke();
+    ctx.fillStyle = '#4ade80'; ctx.beginPath(); ctx.arc(70, 84, 7, 0, 7); ctx.fill();
+    ctx.fillStyle = '#9db4d6'; ctx.font = '500 30px ' + MONO; ctx.fillText('UNVEIL', 124, 95);
+    var rows = [[60, 190, 300, 64, '#12203a'], [150, 290, 300, 96, '#17345e'], [60, 430, 340, 64, '#12203a'], [60, 520, 250, 64, '#12203a'], [150, 630, 300, 64, '#17345e']];
+    rows.forEach(function (r) { rounded(ctx, r[0], r[1], r[2], r[3], 18); ctx.fillStyle = r[4]; ctx.fill(); });
+    rounded(ctx, 40, 840, 432, 120, 26); ctx.fillStyle = '#0b1322'; ctx.fill(); ctx.strokeStyle = '#27456f'; ctx.lineWidth = 3; ctx.stroke();
+    rounded(ctx, 372, 866, 76, 68, 16); ctx.fillStyle = '#2a5fb8'; ctx.fill();
+    ctx.fillStyle = '#5d7396'; ctx.font = '26px ' + MONO; ctx.fillText('Agent · Chat', 66, 910);
+  }
+  // a check layer, drawn in white so the material colour can tint it
+  function drawLayer(title, sub, n) {
+    return function (ctx) {
+      rounded(ctx, 6, 6, 500, 1012, 46);
+      ctx.fillStyle = 'rgba(255,255,255,0.10)'; ctx.fill();
+      ctx.lineWidth = 6; ctx.strokeStyle = '#ffffff'; ctx.stroke();
+      ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 2;
+      for (var y = 240; y < 960; y += 60) { ctx.beginPath(); ctx.moveTo(40, y); ctx.lineTo(472, y); ctx.stroke(); }
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '500 26px ' + MONO; ctx.fillText('CHECK ' + n, 44, 86);
+      ctx.font = '700 44px ' + MONO; ctx.fillText(title, 44, 146);
+      ctx.font = '26px ' + MONO; ctx.globalAlpha = 0.8; ctx.fillText(sub, 44, 192); ctx.globalAlpha = 1;
+    };
+  }
+  function plane(texture, tint) {
+    var m = new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, depthWrite: false, color: tint || 0xffffff });
+    return new THREE.Mesh(new THREE.PlaneGeometry(W, H), m);
+  }
+  var app = plane(tex(drawApp)); rig.add(app);
+  var layers = [
+    plane(tex(drawLayer('REQUEST', 'matches the task?', 1)), BLUE),
+    plane(tex(drawLayer('YOU', 'approve or deny', 2)), BLUE),
+    plane(tex(drawLayer('GUARD', 'misuse or malware?', 3)), BLUE)
+  ];
+  layers.forEach(function (l, i) { l.renderOrder = i + 1; rig.add(l); });
+
+  function dot(color) {
+    var g = new THREE.Group();
+    g.add(new THREE.Mesh(new THREE.SphereGeometry(0.075, 20, 20), new THREE.MeshBasicMaterial({ color: color })));
+    var halo = new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 20), new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
+    g.add(halo); g.renderOrder = 10; rig.add(g); return g;
+  }
+  function trail(color) {
+    var geo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]);
+    var l = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.55 }));
+    rig.add(l); return l;
+  }
+  var good = dot(0x4ade80), bad = dot(0xf05252);
+  var goodTrail = trail(0x4ade80), badTrail = trail(0xf05252);
+  var GOOD_XY = [-0.35, 0.55], BAD_XY = [0.45, -0.7];
+
+  // background watch ring
+  var ring = new THREE.Mesh(new THREE.TorusGeometry(3.0, 0.012, 8, 120), new THREE.MeshBasicMaterial({ color: 0x4a8df8, transparent: true, opacity: 0, depthWrite: false }));
+  var sweep = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 16), new THREE.MeshBasicMaterial({ color: 0x4ade80, transparent: true, opacity: 0, depthWrite: false }));
+  ring.renderOrder = 8; sweep.renderOrder = 9;
+  ring.rotation.x = Math.PI / 2; rig.add(ring); rig.add(sweep);
+
+  function clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function smooth(v, a, b) { var x = clamp((v - a) / (b - a), 0, 1); return x * x * (3 - 2 * x); }
+  function setTrail(line, x, y, z) {
+    var p = line.geometry.attributes.position;
+    p.setXYZ(0, x, y, 0.02); p.setXYZ(1, x, y, z); p.needsUpdate = true;
+  }
+
+  var wide = true;
+  function resize() {
+    var w = stage.clientWidth, h = stage.clientHeight;
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(w, h, false);
+    camera.aspect = w / h;
+    wide = w > 760;
+    camera.position.z = wide ? 13 : 19;
+    camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+  resize();
+
+  function progress() {
+    var r = story.getBoundingClientRect();
+    var stepH = stage.clientHeight || 1;
+    return clamp(-r.top / stepH, 0, 5);
+  }
+
+  var GAP = 1.25;
+  function frame(now) {
+    var t = progress();
+    var e = smooth(t, 0, 0.7) * (1 - smooth(t, 4.5, 5));   // how far the layers are pulled apart
+    var idle = reduce ? 0 : Math.sin(now / 2400) * 0.04;
+
+    layers.forEach(function (l, i) { l.position.z = (i + 1) * (0.03 + GAP * e); });
+
+    var uG = clamp(t - 0.3, 0, 4.3);                      // green action, in layer units
+    var uB = clamp((t - 3.3) * 6, 0, 2.93);               // red action, stops at the guard
+    var blocked = t >= 3.79 && t < 4.5;
+    var done = t >= 4.5;
+    layers.forEach(function (l, i) {
+      var target = (uG >= i + 1 || done) ? OK : BLUE;
+      if (i === 2 && blocked) target = STOP;
+      l.material.color.lerp(target, 0.18);
+      l.material.opacity = 0.06 + 0.89 * e;
+      l.visible = e > 0.02;
+    });
+
+    var showG = t > 0.15 && t < 4.6;
+    good.visible = goodTrail.visible = showG;
+    if (showG) {
+      var zg = uG * GAP * e + 0.05;
+      good.position.set(GOOD_XY[0], GOOD_XY[1], zg);
+      setTrail(goodTrail, GOOD_XY[0], GOOD_XY[1], zg);
+    }
+    var showB = t > 3.3 && t < 4.6;
+    bad.visible = badTrail.visible = showB;
+    if (showB) {
+      var zb = uB * GAP * e + 0.05;
+      bad.position.set(BAD_XY[0], BAD_XY[1], zb);
+      var pulse = blocked && !reduce ? 1 + 0.35 * Math.sin(now / 110) : 1;
+      bad.scale.setScalar(pulse);
+      setTrail(badTrail, BAD_XY[0], BAD_XY[1], zb);
+    }
+
+    var watch = smooth(t, 3.9, 4.3) * (1 - smooth(t, 4.7, 5));
+    // the watch ring and its green dot stay lit for the whole walk-through, brighter on the watch step
+    var lit = smooth(e, 0.02, 0.3);
+    ring.visible = sweep.visible = lit > 0;
+    ring.material.opacity = (0.4 + 0.45 * watch) * lit; sweep.material.opacity = lit;
+    sweep.scale.setScalar(1 + 0.5 * watch);
+    ring.position.z = sweep.position.z = 2 * GAP * e;
+    var a = reduce ? t * 2 : now / 900;
+    sweep.position.x = Math.cos(a) * 3.0; sweep.position.y = 0; sweep.position.z += Math.sin(a) * 3.0;
+
+    rig.rotation.y = -0.18 - (wide ? 0.72 : 0.5) * e + idle;
+    rig.rotation.x = 0.06 + 0.14 * e;
+    var side = wide ? 2.7 : 0;
+    var end = smooth(t, 4.5, 5);
+    var lift = wide ? 0 : (1.3 + 1.0 * e) * (1 - end);
+    rig.scale.setScalar(1 + (wide ? 0.3 : 0.7) * (1 - e));   // the app alone is shown larger
+    rig.position.set(side * e + Math.sin(-rig.rotation.y) * GAP * 1.5 * e, lift, -GAP * 1.2 * e);
+
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
