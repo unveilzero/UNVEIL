@@ -4350,6 +4350,8 @@ def setup_chat_routes(
                                         )
                                         yield f'data: {json.dumps({"type": "compacted", "context_length": _compacted_length})}\n\n'
                                     last_metrics = data.get("data", {})
+                                    # These counts came from the provider, not from an estimate.
+                                    last_metrics.setdefault("usage_source", "real")
                                     _reported_model = last_metrics.get("model")
                                     last_metrics["requested_model"] = _requested_model
                                     last_metrics["model"] = _reported_model or _actual_model or _answered_by or _requested_model

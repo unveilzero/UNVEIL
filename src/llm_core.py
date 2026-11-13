@@ -3338,6 +3338,7 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
     if provider == "anthropic":
         _anth_input_tokens = 0
         _anth_output_tokens = 0
+        _anth_thinking_tokens = None
         _anth_usage_seen = False
         _anth_actual_model = ""
         _anth_model_announced = False
@@ -3433,6 +3434,12 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                             if "output_tokens" in _u:
                                 _anth_usage_seen = True
                             _anth_output_tokens = _u.get("output_tokens", 0)
+                            # Reasoning the model did before answering is billed as
+                            # output but is not part of the visible reply.
+                            _details = _u.get("output_tokens_details")
+                            _thinking = _details.get("thinking_tokens") if isinstance(_details, dict) else None
+                            if isinstance(_thinking, int) and not isinstance(_thinking, bool) and _thinking >= 0:
+                                _anth_thinking_tokens = _thinking
                         elif evt == "message_stop":
                             # Emit accumulated tool calls in OpenAI-compatible format
                             if _anth_tool_blocks:
@@ -3455,6 +3462,8 @@ async def _stream_llm_inner(url: str, model: str, messages: List[Dict], temperat
                                     model,
                                     _anth_actual_model,
                                 )
+                                if _anth_thinking_tokens is not None:
+                                    normalized_usage["thinking_tokens"] = _anth_thinking_tokens
                                 yield f'data: {json.dumps({"type": "usage", "data": normalized_usage})}\n\n'
                             yield "data: [DONE]\n\n"
                             return

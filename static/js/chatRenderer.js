@@ -2706,6 +2706,7 @@ export function displayMetrics(messageElement, metrics) {
         <div class="ctx-stat-row"><span class="ctx-label">Model</span><span class="ctx-stat-value">${model.split('/').pop()}</span></div>
         <div class="ctx-stat-row"><span class="ctx-label">Input</span><span class="ctx-stat-value">${inputTokens.toLocaleString()} tokens${isReal ? '' : '~'}</span></div>
         <div class="ctx-stat-row"><span class="ctx-label">Output</span><span class="ctx-stat-value">${outputTokens.toLocaleString()} tokens${isReal ? '' : '~'}</span></div>
+        ${Number.isFinite(metrics.thinking_tokens) ? `<div class="ctx-stat-row" title="Reasoning before the answer. Already included in Output."><span class="ctx-label">Thinking</span><span class="ctx-stat-value">${Number(metrics.thinking_tokens).toLocaleString()} tokens</span></div>` : ''}
         <div class="ctx-stat-row"><span class="ctx-label">Total</span><span class="ctx-stat-value">${totalTok.toLocaleString()} tokens</span></div>
       </div>
       <div class="ctx-stat-section">

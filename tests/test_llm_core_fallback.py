@@ -1796,3 +1796,34 @@ def test_native_tool_rejection_rebuilds_and_retries_same_candidate(monkeypatch):
     }
     assert not any(chunk.startswith("event: error") for chunk in chunks)
     assert any("```bash" in chunk for chunk in chunks)
+
+
+@pytest.mark.parametrize(
+    ("details", "expected"),
+    [
+        ({"thinking_tokens": 312}, 312),
+        ({"thinking_tokens": 0}, 0),
+        (None, None),
+        ({"thinking_tokens": "many"}, None),
+        ({"thinking_tokens": -5}, None),
+    ],
+)
+def test_anthropic_usage_reports_thinking_tokens_when_provided(monkeypatch, details, expected):
+    usage = {"output_tokens": 348}
+    if details is not None:
+        usage["output_tokens_details"] = details
+    lines = [
+        'data: ' + json.dumps({"type": "message_start", "message": {"usage": {"input_tokens": 25}}}),
+        'data: ' + json.dumps({"type": "content_block_delta", "delta": {"type": "text_delta", "text": "ok"}}),
+        'data: ' + json.dumps({"type": "message_delta", "usage": usage}),
+        'data: ' + json.dumps({"type": "message_stop"}),
+    ]
+    chunks = _run_provider_stream(monkeypatch, "https://api.anthropic.com/v1/messages", lines)
+
+    usage_events = [json.loads(c[len("data: "):]) for c in chunks if '"type": "usage"' in c]
+    assert len(usage_events) == 1
+    data = usage_events[0]["data"]
+    assert data["input_tokens"] == 25
+    assert data["output_tokens"] == 348
+    assert data.get("thinking_tokens") == expected
+    assert ("thinking_tokens" in data) == (expected is not None)
