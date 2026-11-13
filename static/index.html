@@ -1086,6 +1086,17 @@
               </button>
             </div>
             <div class="model-picker-list" id="model-picker-list"></div>
+            <!-- Effort for the selected model. Lives here so it can be set before the first
+                 message; the Chat Context popup borrows it while open and returns it. -->
+            <div id="reasoning-effort-home" class="model-picker-effort">
+              <div class="reasoning-effort-wrap" id="reasoning-effort-wrap" style="display:none;">
+                <button type="button" class="reasoning-effort-btn" id="reasoning-effort-btn" title="Reasoning effort" aria-haspopup="listbox" aria-expanded="false">
+                  <span class="reasoning-effort-prefix">Reasoning effort</span><span class="reasoning-effort-current" id="reasoning-effort-current">Default</span>
+                  <svg class="reasoning-effort-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+                </button>
+                <div class="reasoning-effort-menu hidden" id="reasoning-effort-menu" role="listbox"></div>
+              </div>
+            </div>
           </div>
         </div>
         <script nonce="{{CSP_NONCE}}">
@@ -1252,16 +1263,6 @@
       <input type="checkbox" id="plan-toggle" style="display:none;">
     </div>
     <form id="chat-form" autocomplete="off" action="javascript:void(0);" style="display:none;"></form>
-    <!-- Retain the bound control while the Chat Context popup is closed. -->
-    <div id="reasoning-effort-home" hidden>
-      <div class="reasoning-effort-wrap" id="reasoning-effort-wrap" style="display:none;">
-        <button type="button" class="reasoning-effort-btn" id="reasoning-effort-btn" title="Reasoning effort" aria-haspopup="listbox" aria-expanded="false">
-          <span class="reasoning-effort-prefix">Reasoning effort</span><span class="reasoning-effort-current" id="reasoning-effort-current">Default</span>
-          <svg class="reasoning-effort-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-        </button>
-        <div class="reasoning-effort-menu hidden" id="reasoning-effort-menu" role="listbox"></div>
-      </div>
-    </div>
 
     <!-- Character (custom preset) modal -->
     <div id="custom-preset-modal" class="modal hidden">
