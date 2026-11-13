@@ -53,6 +53,17 @@ an administrator are not shared with other accounts. Each person adds their
 own provider key by typing `/setup` in a chat, and that key is used for their
 chats only.
 
+## Where agent commands run
+
+Commands an agent runs are started in their own empty room: no application
+files, no data directory and no settings, only that chat's workspace. If the
+room cannot be created, the command is refused. To see what a command can
+reach on your server:
+
+```bash
+bash deploy/cloud/check-box.sh
+```
+
 ## Public website
 
 The page in `site/` can be served from the same server. Point the website's

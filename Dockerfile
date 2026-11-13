@@ -40,6 +40,8 @@ FROM brotli-base
 # Chromium otherwise renders Chinese/Japanese/Korean labels as empty boxes.
 # iproute2/iputils-ping/net-tools/dnsutils/nmap give Docker-hosted agents the
 # basic network inspection toolkit expected by local LAN/debugging tasks.
+# bubblewrap gives commands an agent runs their own empty room: no application
+# files, no data directory, no environment variables, only the chat's workspace.
 # gosu lets the entrypoint drop privileges cleanly so signals still reach
 # uvicorn directly (no extra shell layer like `su`/`sudo` would add).
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -53,6 +55,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     fontconfig \
     fonts-noto-cjk \
+    bubblewrap \
     tmux \
     openssh-client \
     iproute2 \

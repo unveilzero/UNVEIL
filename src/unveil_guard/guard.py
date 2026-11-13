@@ -71,6 +71,28 @@ _NETWORK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _SECRET_TOOLS = frozenset({"manage_tokens"})
+# Looking around. A command that sweeps the machine for credential material,
+# dumps the whole environment, or probes the host and its network is refused
+# on its own, before anything is read. Searches inside the workspace are not
+# affected.
+_WIDE_SEARCH_PATTERN = re.compile(
+    r"\b(find|locate|grep\s+-\w*[rR]\w*|rg|ag|ack|ls\s+-\w*R\w*|tree|du|tar|zip)\b[^\n;|&]*?"
+    r"(?<![\w./-])(/|~|\$HOME|/(?:home|root|etc|var|proc|sys|app|opt|mnt|srv|usr|run)(?:/[^\s;|&]*)?)(?=\s|$|[;|&])",
+)
+_ENV_DUMP_PATTERN = re.compile(
+    r"((^|[;&|`(]\s*)(printenv|env|export\s+-p|declare\s+-x)\s*($|[;&|)>])"
+    r"|/proc/(self|\d+|\*)/environ"
+    r"|\b(print|dict|str|repr|list|sorted|json\.dumps|pprint)\(\s*os\.environ\s*[),]"
+    r"|\bos\.environ\.(items|copy|values)\("
+    r"|\b(console\.log|JSON\.stringify)\(\s*process\.env\s*[),])",
+    re.IGNORECASE | re.MULTILINE,
+)
+_CREDENTIAL_WORD_PATTERN = re.compile(r"\b(passwords?|tokens?|bearer|cookies?)\b", re.IGNORECASE)
+_HOST_PROBE_PATTERN = re.compile(
+    r"(169\.254\.169\.254|metadata\.google\.internal|docker\.sock|"
+    r"\b(nmap|masscan|zmap|arp-scan|netdiscover)\b)",
+    re.IGNORECASE,
+)
 # Human authority. Agents may never change the application's own code, the
 # login store, or this security layer; and a change to the application's
 # settings needs a human's approval of that exact action, whatever approval
@@ -241,7 +263,8 @@ class UnveilGuard:
             actions = classify(tool, content)
             verdict, reason = "ALLOW", "allowed_by_policy"
             present = set(actions)
-            violation = self._human_authority_violation(tool, actions, content, human_approved)
+            violation = (self._human_authority_violation(tool, actions, content, human_approved)
+                         or self._looking_around(actions, content))
             if violation:
                 verdict, reason = "BLOCK", violation
             for first, second in self.sequences:
@@ -274,6 +297,19 @@ class UnveilGuard:
         self._counts["allowed" if allowed else "blocked"] += 1
         self._remember(tool, actions, verdict, reason, agent, session_id, owner)
         return GuardDecision(allowed, reason, actions)
+
+    @staticmethod
+    def _looking_around(actions: tuple[str, ...], content: str) -> Optional[str]:
+        """A command whose purpose is to map the machine or collect credentials."""
+        if EXECUTE not in actions:
+            return None
+        text = content if isinstance(content, str) else ""
+        if _ENV_DUMP_PATTERN.search(text) or _HOST_PROBE_PATTERN.search(text):
+            return "environment_scan"
+        looks_for_credentials = _SECRET_PATTERN.search(text) or _CREDENTIAL_WORD_PATTERN.search(text)
+        if looks_for_credentials and _WIDE_SEARCH_PATTERN.search(text):
+            return "environment_scan"
+        return None
 
     # -- reporting --------------------------------------------------------
     def status(self, *, limit: int = 25) -> dict[str, Any]:
