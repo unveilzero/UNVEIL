@@ -1684,9 +1684,12 @@ def setup_model_routes(model_discovery):
             if _disable_stale_cookbook_local_endpoints(db):
                 _invalidate_models_cache()
             q = db.query(ModelEndpoint).filter(ModelEndpoint.is_enabled == True)
-            if owner and not is_admin:
+            _private_connections = os.getenv("UNVEIL_SHARE_ADMIN_MODELS", "true").strip().lower() in {"false", "0", "no"}
+            if owner and (not is_admin or _private_connections):
                 # Regular users see: their own endpoints + null-owner
-                # (legacy / shared). Admins see everything.
+                # (legacy / shared). Admins see everything, unless connections
+                # are kept private, in which case an administrator's picker
+                # also leaves out keys that other accounts added.
                 q = owner_filter(q, ModelEndpoint, owner)
             endpoints = q.all()
         finally:
@@ -3139,4 +3142,6 @@ def setup_model_routes(model_discovery):
     router._refresh_state = _refresh_state
     router._refresh_key = _refresh_key
     router._refresh_caches_bg = _refresh_caches_bg
+    # Lets other routers drop the per-user model list after they change connections.
+    router.invalidate_models_cache = _invalidate_models_cache
     return router

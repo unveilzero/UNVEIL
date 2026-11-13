@@ -45,6 +45,14 @@ The start is refused if the domain, the admin password or the audit key is missi
 
 Open the address in the phone's browser and choose "Add to Home Screen". UNVEIL then opens full screen from its own icon. The agents and the security layer keep running on the server when the phone is closed.
 
+## Other people's accounts
+
+Create accounts in Settings, Users. Keep them non-admin: an administrator can
+run commands on the server. With this cloud setup, model connections added by
+an administrator are not shared with other accounts. Each person adds their
+own provider key by typing `/setup` in a chat, and that key is used for their
+chats only.
+
 ## Public website
 
 The page in `site/` can be served from the same server. Point the website's
@@ -53,6 +61,12 @@ DNS record at this server, add `UNVEIL_SITE_DOMAIN` to `deploy/cloud/.env`
 and the website stays off the internet.
 
 ## Updating
+
+```bash
+bash update.sh
+```
+
+This pulls the latest code and restarts the app, the same as running:
 
 ```bash
 git pull

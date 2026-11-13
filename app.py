@@ -823,7 +823,10 @@ app.include_router(setup_embedding_routes())
 
 # Models
 from routes.model_routes import setup_model_routes
-app.include_router(setup_model_routes(model_discovery))
+_model_router = setup_model_routes(model_discovery)
+app.include_router(_model_router)
+from routes.my_keys_routes import setup_my_keys_routes
+app.include_router(setup_my_keys_routes(getattr(_model_router, "invalidate_models_cache", None)))
 
 # GitHub Copilot device-flow login
 from routes.copilot_routes import setup_copilot_routes

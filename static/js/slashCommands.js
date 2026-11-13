@@ -656,6 +656,11 @@ function setupChatUrlForEndpoint(detected) {
   return base + '/chat/completions';
 }
 
+const PERSONAL_KEY_PROVIDERS = ['anthropic', 'openai', 'openrouter', 'groq', 'gemini', 'xai', 'deepseek', 'nvidia'];
+function _personalKeyProvider(baseUrl) {
+  return PERSONAL_KEY_PROVIDERS.find(key => SETUP_PROVIDER_URLS[key]?.url === baseUrl) || '';
+}
+
 async function connectDetectedSetupEndpoint(detected) {
   const providerLabel = detected.name || 'custom endpoint';
   const chatBox = document.getElementById('chat-history');
@@ -685,7 +690,18 @@ async function connectDetectedSetupEndpoint(detected) {
     if (!isLocal) fd.append('skip_probe', 'true');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30000);
-    const res = await fetch(`${API_BASE}/api/model-endpoints`, { method: 'POST', body: fd, credentials: 'same-origin', signal: controller.signal });
+    let res = await fetch(`${API_BASE}/api/model-endpoints`, { method: 'POST', body: fd, credentials: 'same-origin', signal: controller.signal });
+    // Accounts that are not administrators add the key to their own account instead.
+    const personalProvider = res.status === 403 && detected.api_key ? _personalKeyProvider(detected.base_url) : '';
+    if (personalProvider) {
+      res = await fetch(`${API_BASE}/api/my/model-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        signal: controller.signal,
+        body: JSON.stringify({ provider: personalProvider, api_key: detected.api_key }),
+      });
+    }
     clearTimeout(timer);
     const data = await res.json();
 

@@ -15,6 +15,9 @@ services:
       - SECURE_COOKIES=true
       # Only the front door can reach the app, so its report of the visitor's address is trusted.
       - FORWARDED_ALLOW_IPS=*
+      # Model connections added by an administrator stay with administrators;
+      # every other account uses only the keys it adds itself.
+      - UNVEIL_SHARE_ADMIN_MODELS=false
       - ALLOWED_ORIGINS=https://${UNVEIL_DOMAIN:?Set UNVEIL_DOMAIN in deploy/cloud/.env}
       - OAUTH_REDIRECT_BASE_URL=https://${UNVEIL_DOMAIN}
       - ODYSSEUS_ADMIN_PASSWORD=${ODYSSEUS_ADMIN_PASSWORD:?Set ODYSSEUS_ADMIN_PASSWORD in deploy/cloud/.env}

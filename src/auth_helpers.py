@@ -215,6 +215,26 @@ def owner_filter(query, model_cls, user: str, *, include_shared: bool = True):
     mode). Returns the modified query."""
     if not user:
         return query
+    if include_shared and getattr(model_cls, "__tablename__", "") == "model_endpoints":
+        include_shared = shared_models_visible(user)
     if include_shared:
         return query.filter((model_cls.owner == user) | (model_cls.owner == None))  # noqa: E711
     return query.filter(model_cls.owner == user)
+
+
+def shared_models_visible(user: Optional[str]) -> bool:
+    """Whether `user` may use model connections that have no owner.
+
+    Ownerless connections are the ones an administrator added for everyone.
+    With UNVEIL_SHARE_ADMIN_MODELS=false they are kept to administrators, and
+    every other account uses only the connections it added itself.
+    """
+    if not user:
+        return True
+    if os.getenv("UNVEIL_SHARE_ADMIN_MODELS", "true").strip().lower() not in {"false", "0", "no"}:
+        return True
+    try:
+        from src.tool_security import owner_is_admin_or_single_user
+        return owner_is_admin_or_single_user(user)
+    except Exception:
+        return False
