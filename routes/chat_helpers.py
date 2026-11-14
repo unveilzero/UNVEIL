@@ -19,6 +19,7 @@ from src.context_compactor import maybe_compact, trim_for_context
 from src.model_context import estimate_tokens, get_context_length
 from src.auth_helpers import effective_user
 from src.prompt_security import untrusted_context_message
+from src.unveil_guard import guard_message
 from src.attachment_refs import attachment_ref
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
@@ -470,6 +471,18 @@ def _allowed_models_for_request(request) -> Optional[frozenset[str]]:
         return None
     privs = auth_manager.get_privileges(user) or {}
     return _allowed_models_from_privileges(privs)
+
+
+def _enforce_message_guard(message, *, owner, session_id) -> None:
+    """Apply the UNVEIL guard's text checks to a person's message. Both
+    /api/chat and /api/chat_stream must call this BEFORE any LLM work.
+
+    Raises HTTPException(403) if the guard refuses the message.
+    """
+    refusal = guard_message(message, owner=owner, session_id=session_id)
+    if refusal:
+        raise HTTPException(403, {"error": "UNVEIL_GUARD_BLOCKED", "message": refusal})
+
 
 def _enforce_chat_privileges(request, sess) -> None:
     """Apply the per-user privilege gates (allowed_models + max_messages_per_day)

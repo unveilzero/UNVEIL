@@ -1,10 +1,11 @@
-"""UNVEIL security layer: ARAD runtime monitoring built into the tool dispatcher."""
+"""UNVEIL security layer: ARAD runtime monitoring built into the tool dispatcher, and text checks."""
 
 from .guard import (
-    UnveilGuard, get_guard, guard_direct_mcp_call, guard_tool_call, guarded_call, reset_guard_for_tests,
+    UnveilGuard, get_guard, guard_direct_mcp_call, guard_message, guard_tool_call, guarded_call,
+    reset_guard_for_tests,
 )
 
 __all__ = [
-    "UnveilGuard", "get_guard", "guard_direct_mcp_call", "guard_tool_call", "guarded_call",
+    "UnveilGuard", "get_guard", "guard_direct_mcp_call", "guard_message", "guard_tool_call", "guarded_call",
     "reset_guard_for_tests",
 ]

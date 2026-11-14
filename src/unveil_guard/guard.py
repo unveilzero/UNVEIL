@@ -1,10 +1,14 @@
-"""UNVEIL guard: ARAD runtime monitoring for every tool call.
+"""UNVEIL guard: ARAD runtime monitoring for every tool call, and text checks.
 
 Every tool call the agent runtime dispatches is described to ARAD's
 ``RuntimeEffectMonitor`` before it runs. The monitor decides ALLOW or BLOCK
 from an allowlist, from blocked action sequences correlated per session and
 per owner, and from its own timing and capacity rules. Each decision is
 written to a hash-chained audit log.
+
+A person's message is read by the text checks before a model sees it. A
+message whose wording matches a rule is refused and the refusal is written
+to the same audit log.
 
 This layer is additive. It runs after the application's own request
 authority and approval checks and can only deny, never grant.
@@ -35,6 +39,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from .arad.runtime_monitor import RuntimeEffectMonitor
+from .text_checks import find_rule
 
 logger = logging.getLogger("unveil.guard")
 
@@ -230,6 +235,10 @@ class UnveilGuard:
                 "reason": reason, "agent": agent, "session": (session_id or "")[:12], "owner": owner or "",
             })
 
+    def _audit_block(self, reason: str, event: dict) -> None:
+        self.monitor.audit_log.append("runtime_effect_decision", {
+            "decision": "BLOCK", "reason": reason, "event": event})
+
     @staticmethod
     def _human_authority_violation(tool: str, actions: tuple[str, ...], content: str,
                                    human_approved: bool) -> Optional[str]:
@@ -251,10 +260,9 @@ class UnveilGuard:
             if self._lockdown is not None:
                 try:
                     with self._eval_lock:
-                        self.monitor.audit_log.append("runtime_effect_decision", {
-                            "decision": "BLOCK", "reason": "lockdown",
-                            "event": {"trace_id": session_id or agent, "agent_id": agent, "action": "LOCKDOWN",
-                                      "resource": tool}})
+                        self._audit_block("lockdown", {
+                            "trace_id": session_id or agent, "agent_id": agent, "action": "LOCKDOWN",
+                            "resource": tool})
                 except Exception:
                     logger.exception("UNVEIL guard could not record a lockdown refusal")
                 self._remember(tool, actions, "BLOCK", "lockdown", agent, session_id, owner)
@@ -282,8 +290,7 @@ class UnveilGuard:
                 if owner:
                     event["parent_agent_id"] = f"owner:{owner}"
                 if verdict == "BLOCK":
-                    self.monitor.audit_log.append("runtime_effect_decision", {
-                        "decision": "BLOCK", "reason": reason, "event": dict(event, action="+".join(actions))})
+                    self._audit_block(reason, dict(event, action="+".join(actions)))
                 else:
                     for action in actions:
                         result = self.monitor.evaluate_event(dict(event, action=action))
@@ -297,6 +304,29 @@ class UnveilGuard:
         self._counts["allowed" if allowed else "blocked"] += 1
         self._remember(tool, actions, verdict, reason, agent, session_id, owner)
         return GuardDecision(allowed, reason, actions)
+
+    def check_message(self, text: str, *, owner: Optional[str], session_id: Optional[str]) -> GuardDecision:
+        """Decide one message from a person. Raises nothing; an internal failure is a BLOCK."""
+        agent = f"session:{session_id or 'none'}"
+        try:
+            text = text if isinstance(text, str) else ""
+            rule = find_rule(text)
+            if rule is None:
+                return GuardDecision(True, "allowed_by_policy", ())
+            reason = f"text_check:{rule}"
+            event = {
+                "trace_id": session_id or agent, "agent_id": agent, "action": "MESSAGE",
+                "resource": "message#" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12],
+            }
+            if owner:
+                event["parent_agent_id"] = f"owner:{owner}"
+            self._audit_block(reason, event)
+        except Exception as error:  # an internal failure is a BLOCK
+            logger.exception("UNVEIL guard failure")
+            reason = f"guard_error:{type(error).__name__}"
+        self._counts["blocked"] += 1
+        self._remember("message", (), "BLOCK", reason, agent, session_id, owner)
+        return GuardDecision(False, reason, ())
 
     @staticmethod
     def _looking_around(actions: tuple[str, ...], content: str) -> Optional[str]:
@@ -374,6 +404,18 @@ def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id
         "exit_code": 1, "blocked": True, "failure_kind": "unveil_guard_denied",
         "policy": "unveil_guard", "unveil_reason": decision.reason,
     }
+
+
+def guard_message(text: str, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
+    """Gate used where a person's message enters. Returns None to proceed, or the refusal text."""
+    try:
+        decision = get_guard().check_message(text, owner=owner, session_id=session_id)
+    except Exception as error:  # the guard could not even be built: fail closed
+        logger.exception("UNVEIL guard unavailable")
+        return f"UNVEIL guard is unavailable ({type(error).__name__}); the message was not sent to the model."
+    if not decision.blocked:
+        return None
+    return f"Blocked by the UNVEIL security layer ({decision.reason}). The message was not sent to the model."
 
 
 def guarded_call():
