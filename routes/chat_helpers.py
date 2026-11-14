@@ -12,14 +12,14 @@ from typing import Any, Optional
 
 from core.models import ChatMessage
 from core.database import SessionLocal
-from core.database import Session as DBSession, ModelEndpoint
+from core.database import Session as DBSession, Document, ModelEndpoint
 from src.llm_core import normalize_model_id
 from src.endpoint_resolver import normalize_base
 from src.context_compactor import maybe_compact, trim_for_context
 from src.model_context import estimate_tokens, get_context_length
 from src.auth_helpers import effective_user
 from src.prompt_security import untrusted_context_message
-from src.unveil_guard import guard_message
+from src.unveil_guard import guard_message, guard_outside_text, withheld_notice
 from src.attachment_refs import attachment_ref
 from routes.prefs_routes import _load_for_user as load_prefs_for_user
 
@@ -482,6 +482,35 @@ def _enforce_message_guard(message, *, owner, session_id) -> None:
     refusal = guard_message(message, owner=owner, session_id=session_id)
     if refusal:
         raise HTTPException(403, {"error": "UNVEIL_GUARD_BLOCKED", "message": refusal})
+
+
+def _discard_documents(doc_ids) -> None:
+    """Remove the session documents that this request made from a withheld attachment."""
+    from src.agent_tools.document_tools import clear_active_document
+    db = SessionLocal()
+    try:
+        for doc in db.query(Document).filter(Document.id.in_(doc_ids)):
+            clear_active_document(doc.id)
+            db.delete(doc)
+        db.commit()
+    finally:
+        db.close()
+
+
+def _enforce_attachment_guard(message, text, documents, *, owner, session_id) -> None:
+    """Apply the UNVEIL guard's text checks to what attachments add to a person's
+    message. ``text`` is the message with the attachment text. ``documents`` are
+    the session documents that preprocessing made from the attachments; they
+    hold the full text. Call this BEFORE the message is kept or any LLM reads it.
+
+    Raises HTTPException(403) if the guard withholds the attachment text. The
+    documents are removed first, so the withheld text does not stay in the session.
+    """
+    added = "\n".join([text.replace(message.strip(), "", 1), *(str(doc.get("content") or "") for doc in documents)]).strip()
+    reason = added and guard_outside_text("attachment", added, owner=owner, session_id=session_id)
+    if reason:
+        _discard_documents([doc["doc_id"] for doc in documents])
+        raise HTTPException(403, {"error": "UNVEIL_GUARD_BLOCKED", "message": withheld_notice("Attachment", reason)})
 
 
 def _enforce_chat_privileges(request, sess) -> None:
@@ -1180,6 +1209,8 @@ async def build_chat_context(
         auto_opened_docs=auto_opened_docs,
         allow_tool_preprocessing=allow_tool_preprocessing,
     )
+    await asyncio.to_thread(_enforce_attachment_guard, message, preprocessed.text_for_context, auto_opened_docs,
+                            owner=effective_user(request), session_id=session_id)
 
     # Add user message to history. Nobody/incognito uses a request-local
     # transcript store instead of session history so stale saved chats cannot
@@ -1307,7 +1338,9 @@ async def build_chat_context(
 
     # Inject pre-fetched search context (compare mode)
     if search_context and allow_tool_preprocessing and not casual_low_signal:
-        preface.append(untrusted_context_message("prefetched search context", search_context))
+        reason = guard_outside_text("web_search_context", search_context, owner=user, session_id=session_id)
+        preface.append({"role": "system", "content": withheld_notice("Web search results", reason)} if reason
+                       else untrusted_context_message("prefetched search context", search_context))
 
     # Inject selected notes as context
     if selected_notes_context:
@@ -1327,11 +1360,15 @@ async def build_chat_context(
         )
 
     # YouTube transcripts
+    youtube_read = []
     for transcript in preprocessed.youtube_transcripts:
-        preface.append(untrusted_context_message("youtube transcript", transcript))
-    for source in youtube_prefetch_sources(
-        preprocessed.text_for_context, preprocessed.youtube_transcripts
-    ):
+        reason = guard_outside_text("youtube", transcript, owner=user, session_id=session_id)
+        if reason:
+            preface.append({"role": "system", "content": withheld_notice("YouTube transcript or comments", reason)})
+        else:
+            youtube_read.append(transcript)
+            preface.append(untrusted_context_message("youtube transcript", transcript))
+    for source in youtube_prefetch_sources(preprocessed.text_for_context, youtube_read):
         if not any(existing.get("url") == source["url"] for existing in web_sources):
             web_sources.append(source)
 

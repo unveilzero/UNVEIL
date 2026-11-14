@@ -1058,6 +1058,7 @@ class ResearchHandler:
                 search_provider=search_provider,
                 category=category,
                 session_id=session_id,
+                owner=(_task_entry or {}).get("owner", ""),
             )
             if _task_entry is not None:
                 _task_entry["researcher"] = researcher

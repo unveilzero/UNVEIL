@@ -9,6 +9,7 @@ from src.chat_helpers import extract_urls
 from src.youtube_handler import is_youtube_url
 from src.search import comprehensive_web_search, fetch_webpage_content
 from src.prompt_security import UNTRUSTED_CONTEXT_POLICY, untrusted_context_message
+from src.unveil_guard import guard_content, guard_outside_text, released_tool_result, withheld_notice
 
 logger = logging.getLogger(__name__)
 
@@ -406,6 +407,10 @@ class ChatProcessor:
             except Exception as e:
                 logger.warning(f"RAG retrieval failed: {e}")
 
+        # UNVEIL security layer: web search results and linked pages are read
+        # before the model gets them.
+        session_id = getattr(session, "id", None)
+
         # Add web search if enabled
         web_sources = []
         if use_web:
@@ -460,11 +465,21 @@ class ChatProcessor:
                 search_query = _clean_search_query(search_query, max_len=150)
 
                 if search_query:
+                    # Results that the person released for this message are
+                    # handed over; the search does not run again.
+                    released = released_tool_result("web_search_context", message, owner=owner, session_id=session_id)
                     # Execute web search using the final selected query
-                    web_context, web_sources = comprehensive_web_search(
+                    web_context, web_sources = released or comprehensive_web_search(
                         search_query, time_filter=time_filter, return_sources=True
                     )
-                    preface.append(untrusted_context_message("web search results", web_context))
+                    withheld = None if released else guard_content(
+                        "web_search_context", (web_context, web_sources), owner=owner, session_id=session_id,
+                        key=message)
+                    if withheld:
+                        web_sources = []
+                        preface.append({"role": "system", "content": withheld_notice("Web search results", withheld)})
+                    else:
+                        preface.append(untrusted_context_message("web search results", web_context))
             except Exception as e:
                 logger.error(f"Web search failed: {e}")
                 preface.append({"role": "system", "content": "Web search encountered an error and could not retrieve results."})
@@ -490,6 +505,10 @@ class ChatProcessor:
                     result = {"success": False, "error": ""}
                 if result.get('success'):
                     content = result.get('content', '')[:10000]
+                    withheld = guard_outside_text("linked_page", content, owner=owner, session_id=session_id)
+                    if withheld:
+                        preface.append({"role": "system", "content": withheld_notice(f"Linked page {url}", withheld)})
+                        continue
                     preface.append(untrusted_context_message(
                         f"web page: {url}",
                         f"Content from {url}:\n\n{content}",

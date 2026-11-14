@@ -30,6 +30,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 from src.task_endpoint import resolve_task_candidates, task_llm_call_async
+from src.unveil_guard import guard_content
 
 from .email_helpers import (
     _strip_think, _extract_reply, _apply_email_style_mechanics, _load_settings, _save_settings, _get_email_config,
@@ -44,6 +45,10 @@ from .email_helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Emails that the UNVEIL security layer withheld, as (owner, message id), so a
+# later pass does not read and record the same email again.
+_guard_withheld: set = set()
 
 # Recovers a `[{"action": ...}, ...]` JSON array from raw LLM output when the
 # fenced-block strip leaves nothing usable. Runs on model output influenced by
@@ -787,6 +792,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
         processed = 0
         already_cached = 0
         too_short = 0
+        withheld = 0
         no_msgid = 0
         examined = 0
         _summaries_created = 0
@@ -923,6 +929,17 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                 body_for_llm = body
                 if att_text:
                     body_for_llm = (body or "") + "\n\n--- ATTACHMENTS ---\n\n" + att_text
+
+                # UNVEIL security layer: the email is read before a model gets
+                # it. A withheld email gets no automatic work in this pass.
+                _guard_key = (account_owner or "", message_id)
+                if _guard_key not in _guard_withheld and await asyncio.to_thread(
+                        guard_content, "email", f"{sender}\n{subject}\n{body_for_llm}",
+                        owner=account_owner or None, session_id=None):
+                    _guard_withheld.add(_guard_key)
+                if _guard_key in _guard_withheld:
+                    withheld += 1
+                    continue
 
                 # A real calendar attachment is already structured; do not
                 # spend a small model call reinterpreting it (and do not let
@@ -1546,11 +1563,13 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
             parts.append(f"{already_cached} already cached")
         if too_short:
             parts.append(f"{too_short} too short to process")
+        if withheld:
+            parts.append(f"{withheld} withheld by the UNVEIL security layer")
         if no_msgid:
             parts.append(f"{no_msgid} missing Message-ID")
         if _events_created:
             parts.append(f"created {_events_created} calendar event(s)")
-        if processed == 0 and already_cached == 0 and too_short == 0:
+        if processed == 0 and already_cached == 0 and too_short == 0 and withheld == 0:
             parts.append("nothing to do")
         summary = " · ".join(parts)
         if _detail_lines:

@@ -20,6 +20,7 @@ from src.research_navigator import ResearchAction, ResearchNavigator, ResearchPa
 
 from src.goal_based_extractor import EXTRACTOR_SYSTEM
 from src.prompt_security import untrusted_context_message
+from src.unveil_guard import guard_content
 
 logger = logging.getLogger(__name__)
 
@@ -363,6 +364,7 @@ class DeepResearcher:
         search_provider: Optional[str] = None,
         category: Optional[str] = None,
         session_id: str = "",
+        owner: str = "",
     ):
         self.llm_endpoint = llm_endpoint
         self.llm_model = llm_model
@@ -371,6 +373,7 @@ class DeepResearcher:
         self.search_provider_override = search_provider
         self.category = category
         self.session_id = session_id
+        self.owner = owner
         self.max_rounds = max_rounds
         self.max_time = max_time
         self.max_urls_per_round = max_urls_per_round
@@ -436,6 +439,22 @@ class DeepResearcher:
     # Public API
     # ------------------------------------------------------------------
     async def research(
+        self,
+        question: str,
+        prior_report: str = "",
+        prior_findings: Optional[List[Dict]] = None,
+        prior_urls: Optional[Set[str]] = None,
+    ) -> str:
+        """Run iterative research and return a final report. The report states
+        how many pages the UNVEIL security layer withheld from the run."""
+        report = await self._research(question, prior_report, prior_findings, prior_urls)
+        withheld = getattr(self, "pages_withheld", 0)
+        if withheld:
+            report += (f"\n\n---\nThe UNVEIL security layer withheld {withheld} page(s) from this research. "
+                       "The model did not read them. The reasons are in the UNVEIL security panel.")
+        return report
+
+    async def _research(
         self,
         question: str,
         prior_report: str = "",
@@ -1339,6 +1358,22 @@ class DeepResearcher:
                 else:
                     content = truncated
 
+            # UNVEIL security layer: the page is read before the model gets it.
+            withheld = await asyncio.to_thread(
+                guard_content, "research_page", content,
+                owner=getattr(self, "owner", None) or None, session_id=getattr(self, "session_id", None) or None)
+            if withheld:
+                self.pages_withheld = getattr(self, "pages_withheld", 0) + 1
+                self._record_navigation(
+                    "browser_read" if page.retrieval == "browser" else requested_tool,
+                    url=url,
+                    title=title or page.title,
+                    status="withheld",
+                    retrieval=page.retrieval,
+                    error=withheld,
+                )
+                return None
+
             try:
                 response = await self._llm(
                     [
@@ -1976,6 +2011,9 @@ class DeepResearcher:
         browser_fetches = int(getattr(navigator, "browser_fetches", 0) or 0)
         if browser_fetches:
             stats["Browser reads"] = browser_fetches
+        pages_withheld = getattr(self, "pages_withheld", 0)
+        if pages_withheld:
+            stats["Pages withheld"] = pages_withheld
         if self.category:
             stats["Category"] = self.category.capitalize()
         return stats

@@ -7,10 +7,14 @@ per owner, and from its own timing and capacity rules. Each decision is
 written to a hash-chained audit log.
 
 A person's message is read by the text checks before a model sees it, and
-so is the result of each tool call. A text whose wording matches a rule is
-refused or withheld, and that decision is written to the same audit log.
-The person sees the rule and the wording. A withheld tool result is kept for
-a short time, and the person it belongs to can release that one result.
+so is outside content: the result of each tool call, the text of an
+attachment, web search results and linked pages added in chat mode, video
+transcripts and comments, the open document, email text, a research page,
+and the result of a call to an outside tool server. A text whose wording
+matches a rule is refused or withheld, and that decision is written to the
+same audit log. The person sees the rule and the wording. An item that came
+with a person's request is kept for a short time, and the person it belongs
+to can release that one item.
 
 This layer is additive. It runs after the application's own request
 authority and approval checks and can only deny, never grant.
@@ -333,8 +337,8 @@ class UnveilGuard:
                    held: Optional[tuple] = None) -> GuardDecision:
         """Decide one text before a model reads it. Raises nothing; an internal failure is a BLOCK.
 
-        ``source`` is ``MESSAGE`` for a person's message, or the name of the tool that returned the text.
-        ``held`` is the input and the output of that tool call, kept so the person can release the result.
+        ``source`` is ``MESSAGE`` for a person's message, or the name of the tool or path the text came from.
+        ``held`` is the key and the content of that item, kept so the person can release it.
         """
         agent = f"session:{session_id or 'none'}"
         shown: dict[str, str] = {}
@@ -490,17 +494,49 @@ def guard_message(text: str, *, owner: Optional[str], session_id: Optional[str])
     return f"Blocked by the UNVEIL security layer ({decision.reason}). The message was not sent to the model."
 
 
-def guard_tool_result(tool: str, content: str, output: tuple, *, owner: Optional[str], session_id: Optional[str]):
-    """Gate used by the tool dispatcher after a tool ran. Returns None to pass the output on, or a withheld result tuple."""
+def _read_content(source: str, output: Any, held: Optional[tuple], *, owner: Optional[str],
+                  session_id: Optional[str], take_released: bool = False) -> Optional[str]:
+    """Read outside content before a model gets it. Returns None to pass it on, or the reason it is withheld."""
     try:
-        decision = get_guard().check_text(tool, "\n".join(_strings(output)), owner=owner, session_id=session_id,
-                                          held=(content, output))
-        if not decision.blocked:
+        guard = get_guard()
+        if take_released and guard.take_released(source, held[0], owner=owner, session_id=session_id):
             return None
-        reason = decision.reason
+        decision = guard.check_text(source, "\n".join(_strings(output)), owner=owner, session_id=session_id, held=held)
+        return decision.reason if decision.blocked else None
     except Exception as error:  # the guard could not even be built: fail closed
         logger.exception("UNVEIL guard unavailable")
-        reason = f"guard_unavailable:{type(error).__name__}"
+        return f"guard_unavailable:{type(error).__name__}"
+
+
+def guard_content(source: str, output: Any, *, owner: Optional[str], session_id: Optional[str],
+                  key: Optional[str] = None) -> Optional[str]:
+    """Read outside content before a model gets it. Returns None to pass it on, or the reason it is withheld.
+
+    ``source`` names where the content came from. With ``key``, the content is kept for a short time and the
+    person can release it; ``released_tool_result(source, key)`` then returns it.
+    """
+    return _read_content(source, output, None if key is None else (key, output), owner=owner, session_id=session_id)
+
+
+def guard_outside_text(source: str, text: str, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
+    """Read outside text that came with a person's request. Returns None to pass it on, or the reason it is withheld.
+
+    The text is kept for a short time. After the person releases it, the same text passes one time.
+    """
+    return _read_content(source, text, (text, text), owner=owner, session_id=session_id, take_released=True)
+
+
+def withheld_notice(item: str, reason: str) -> str:
+    """The words that tell a person or a model that the guard withheld an item the person can release."""
+    return (f"{item}: withheld by the UNVEIL security layer ({reason}). It was not given to the model. The person "
+            "can read the reason in the UNVEIL security panel and release it there, and then send the request again.")
+
+
+def guard_tool_result(tool: str, content: str, output: tuple, *, owner: Optional[str], session_id: Optional[str]):
+    """Gate used by the tool dispatcher after a tool ran. Returns None to pass the output on, or a withheld result tuple."""
+    reason = guard_content(tool, output, owner=owner, session_id=session_id, key=content)
+    if reason is None:
+        return None
     return f"{tool}: BLOCKED", {
         "error": f"Withheld by the UNVEIL security layer ({reason}). The action ran, but its result was not given "
                  "to the model. The person can read the reason in the UNVEIL security panel and release this one "
@@ -511,7 +547,7 @@ def guard_tool_result(tool: str, content: str, output: tuple, *, owner: Optional
 
 
 def released_tool_result(tool: str, content: str, *, owner: Optional[str], session_id: Optional[str]):
-    """Used by the tool dispatcher before a tool runs. Returns the output a person released for this call, or None."""
+    """Returns the output a person released for this call or this content, one time, or None."""
     return get_guard().take_released(tool, content, owner=owner, session_id=session_id)
 
 
@@ -540,4 +576,16 @@ def guard_direct_mcp_call(qualified_name: str, arguments: Any) -> Optional[dict]
     if not decision.blocked:
         return None
     return {"error": f"Blocked by the UNVEIL security layer (ARAD): {decision.reason}",
+            "exit_code": 1, "blocked": True, "failure_kind": "unveil_guard_denied"}
+
+
+def guard_direct_mcp_result(qualified_name: str, result: Any) -> Optional[dict]:
+    """Gate for the result of a call to an outside tool server that did not come through the dispatcher."""
+    if _in_guarded_call.get():
+        return None
+    reason = guard_content(qualified_name, result, owner=None, session_id=None)
+    if reason is None:
+        return None
+    return {"error": f"Withheld by the UNVEIL security layer ({reason}). The call ran, but its result was not "
+                     "given to the model.",
             "exit_code": 1, "blocked": True, "failure_kind": "unveil_guard_denied"}

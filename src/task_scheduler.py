@@ -2274,6 +2274,7 @@ class TaskScheduler:
             max_report_tokens=max_tokens,
             extraction_timeout=extraction_timeout,
             extraction_concurrency=extraction_concurrency,
+            owner=task.owner or "",
         )
 
         started_ts = time.time()

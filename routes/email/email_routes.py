@@ -47,6 +47,7 @@ from src import shutdown as _shutdown
 from src.path_confinement import confine
 
 from src.llm_core import llm_call_async
+from src.unveil_guard import guard_outside_text, withheld_notice
 from src.upload_limits import read_upload_limited, EMAIL_COMPOSE_UPLOAD_MAX_BYTES
 
 from .email_helpers import (
@@ -6625,6 +6626,16 @@ def setup_email_routes():
             if att_text:
                 body_for_llm = body + "\n\n--- ATTACHMENTS ---\n\n" + att_text
 
+            # UNVEIL security layer: the email is read before the model gets it.
+            withheld = await asyncio.to_thread(
+                guard_outside_text, "email", f"{sender}\n{subject}\n{body_for_llm}", owner=owner, session_id=None)
+            if withheld:
+                return {
+                    "success": False,
+                    "error": withheld_notice("Email", withheld),
+                    "error_code": "unveil_guard_withheld",
+                }
+
             url, model, headers = resolve_endpoint("utility", owner=owner)
             if not url:
                 url, model, headers = resolve_endpoint("default", owner=owner)
@@ -7053,6 +7064,15 @@ def setup_email_routes():
                     "sent. Do NOT cite this material verbatim unless the sender "
                     "directly asked about something in it.\n\n" + referenced[:18000]
                 )
+
+            # UNVEIL security layer: the email and the earlier mail that goes
+            # with it are read before the model gets them.
+            withheld = await asyncio.to_thread(
+                guard_outside_text, "email",
+                "\n".join([to or "", subject or "", original_body[:6000], *context_snippets[:5], referenced[:18000]]),
+                owner=owner, session_id=None)
+            if withheld:
+                return {"success": False, "error": withheld_notice("Email", withheld)}
 
             user_msg = (
                 f"Recipient: {to}\nSubject: {subject}\n\n"

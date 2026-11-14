@@ -49,6 +49,7 @@ from src.foreground_model_routing import (
 )
 from src.session_search import search_session_messages
 from src.prompt_security import untrusted_context_message
+from src.unveil_guard import guard_outside_text, withheld_notice
 from core.exceptions import SessionNotFoundError
 from src.auth_helpers import (
     effective_user,
@@ -115,6 +116,21 @@ def _append_internal_chat_context(ctx, message):
     routed = getattr(ctx, "route_messages", None)
     if routed is not None and routed is not ctx.messages:
         routed.append(tagged)
+
+
+async def _open_item_withheld(ctx, source, item, text, session_id) -> bool:
+    """Apply the UNVEIL guard's text checks to the open document or the open
+    email before the agent gets it. Returns True when the guard withholds it;
+    the model is then told in place of the item.
+    """
+    reason = await asyncio.to_thread(guard_outside_text, source, text, owner=ctx.user, session_id=session_id)
+    if reason:
+        notice = {"role": "system", "content": withheld_notice(item, reason)}
+        ctx.messages.insert(0, notice)
+        routed = getattr(ctx, "route_messages", None)
+        if routed is not None and routed is not ctx.messages:
+            routed.insert(0, dict(notice))
+    return bool(reason)
 
 
 # Track active streams for partial-save safety net
@@ -3244,6 +3260,15 @@ def setup_chat_routes(
             logger.warning(f"Failed to query active document: {e}")
         finally:
             _doc_db.close()
+
+        if active_doc and await _open_item_withheld(
+                ctx, "open_document", "The open document",
+                f"{active_doc.title}\n{active_doc.current_content or ''}", session):
+            active_doc = None
+        if active_email_ctx and await _open_item_withheld(
+                ctx, "open_email", "The open email",
+                "\n".join(active_email_ctx.get(key, "") for key in ("from", "subject", "body_preview")), session):
+            active_email_ctx = {key: active_email_ctx[key] for key in ("uid", "folder", "account")}
 
         if (
             active_doc

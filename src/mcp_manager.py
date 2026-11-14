@@ -573,6 +573,13 @@ class McpManager:
 
         Returns a result dict compatible with agent_tools format.
         """
+        result = await self._call_tool(qualified_name, arguments)
+        # UNVEIL security layer: the result of a call that did not come through
+        # the tool dispatcher is read here, before the caller gets it.
+        from src.unveil_guard import guard_direct_mcp_result
+        return await asyncio.to_thread(guard_direct_mcp_result, qualified_name, result) or result
+
+    async def _call_tool(self, qualified_name: str, arguments: Dict) -> Dict:
         parts = qualified_name.split("__", 2)
         if len(parts) != 3 or parts[0] != "mcp":
             return {"error": f"Invalid MCP tool name: {qualified_name}", "exit_code": 1}
