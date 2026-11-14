@@ -1,10 +1,12 @@
-"""UNVEIL guard text checks: wording rules for a person's message.
+"""UNVEIL guard text checks: wording rules for a person's message and for outside content.
 
-``find_rule`` reads one message before a model sees it and returns the name
-of the first rule the wording matches, or ``None``. The rules are fixed in
-this file and use no model, so they run the same with or without one.
+``find_rule`` reads one text before a model sees it and returns the first
+rule the wording matches, with the wording itself, or ``None``. Outside content is the
+result of a tool: a web page, a file, or any other tool output. It is read
+with the message rules and with the rules for content. The rules are fixed
+in this file and use no model, so they run the same with or without one.
 
-Each message is read in two forms. The plain form removes accents, invisible
+Each text is read in two forms. The plain form removes accents, invisible
 characters and extra spacing. The folded form also turns look-alike digits,
 symbols and letters into the plain letters they stand for.
 """
@@ -13,7 +15,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Optional
+from typing import NamedTuple, Optional
 
 _TARGETS = r"(instructions?|rules|guidelines|prompts?|directives|directions|restrictions|programming|training)"
 _ROLE = r"you are|you're|you will be|act as|behave as|pretend to be|pretend you are|role-?play as|respond as|answer as"
@@ -50,6 +52,17 @@ _RULES = tuple((name, re.compile(pattern, re.IGNORECASE)) for name, pattern in (
      r"\b(instructions?|commands?|message|text)\b"),
 ))
 
+_AI_READER = r"(ai|a\.i\.|llm|(large )?language model|ai assistant|ai agent|chatbot)s?"
+_CONTENT_RULES = _RULES + (
+    # Wording in content that speaks to the model that reads it.
+    ("reader_directive", re.compile(
+        r"\bif you('re| are) an? " + _AI_READER + r"\b"
+        r"|\b(instructions?|note|notice|message|attention)\s+(to|for)\s+((the|any|all)\s+)?" + _AI_READER + r"\b"
+        r"|\b(do not|don't|never)\s+(tell|inform|notify|alert)\s+the\s+(user|human|person|operator)"
+        r"(\s+(about|of|that you|this|anything)\b|\s*([.!\n]|$))",
+        re.IGNORECASE)),
+)
+
 _SPACING = re.compile(r"[^\S\n]+")
 _LOOK_ALIKES = str.maketrans({
     "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
@@ -57,16 +70,22 @@ _LOOK_ALIKES = str.maketrans({
 })
 
 
+class Finding(NamedTuple):
+    rule: str
+    excerpt: str  # the matched wording with a little of the text around it, for the person
+
+
 def _plain(text: str) -> str:
     kept = (ch for ch in unicodedata.normalize("NFKD", text) if unicodedata.category(ch) not in ("Mn", "Cf"))
     return _SPACING.sub(" ", "".join(kept))
 
 
-def find_rule(text: str) -> Optional[str]:
-    """Return the name of the first rule that ``text`` matches, or ``None``."""
+def find_rule(text: str, *, content: bool = False) -> Optional[Finding]:
+    """Return the first rule that ``text`` matches, or ``None``."""
     plain = _plain(text)
     for form in (plain, plain.lower().translate(_LOOK_ALIKES)):
-        for name, pattern in _RULES:
-            if pattern.search(form):
-                return name
+        for name, pattern in (_CONTENT_RULES if content else _RULES):
+            match = pattern.search(form)
+            if match:
+                return Finding(name, form[max(0, match.start() - 60):match.end() + 60].strip())
     return None

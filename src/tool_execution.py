@@ -1940,7 +1940,7 @@ async def execute_tool_block(
 
     # UNVEIL security layer (ARAD). Last check before the tool runs: every
     # application check above has passed, and this one can only deny.
-    from src.unveil_guard import guard_tool_call, guarded_call
+    from src.unveil_guard import guard_tool_call, guard_tool_result, guarded_call, released_tool_result
     unveil_block = guard_tool_call(operation.transport_tool, operation.input, owner=owner, session_id=session_id,
                                    human_approved=bool(approval_claimed))
     if unveil_block is not None:
@@ -1959,7 +1959,10 @@ async def execute_tool_block(
               bind_backend_operation(backend_operation), bind_owned_operation(owned_operation),
               bind_process_operation(process_operation), bind_browser_operation(browser_operation),
               guarded_call()):
-            output = await _execute_tool_block_impl(
+            # A result that the person released for this exact call is handed over; the tool does not run again.
+            released = released_tool_result(operation.transport_tool, operation.input, owner=owner,
+                                            session_id=session_id)
+            output = released or await _execute_tool_block_impl(
                 ToolBlock(transport, normalized.execution_input) if normalized is not None else block,
                 session_id=session_id,
                 disabled_tools=disabled_tools,
@@ -1978,7 +1981,12 @@ async def execute_tool_block(
                 output[1],
                 getattr(block, "content", None),
             )
-        return output
+        if released is not None:
+            return released
+        # UNVEIL security layer: the result is read before the model gets it.
+        withheld = await asyncio.to_thread(guard_tool_result, operation.transport_tool, operation.input, output,
+                                           owner=owner, session_id=session_id)
+        return withheld or output
     except ResourceIdentityError as error:
         if native_browser(operation, backend_operation.resource) and str(error) == PAGE_FAILURE:
             return f"{transport}: UNSUPPORTED", page_unavailable()

@@ -6,9 +6,11 @@ from an allowlist, from blocked action sequences correlated per session and
 per owner, and from its own timing and capacity rules. Each decision is
 written to a hash-chained audit log.
 
-A person's message is read by the text checks before a model sees it. A
-message whose wording matches a rule is refused and the refusal is written
-to the same audit log.
+A person's message is read by the text checks before a model sees it, and
+so is the result of each tool call. A text whose wording matches a rule is
+refused or withheld, and that decision is written to the same audit log.
+The person sees the rule and the wording. A withheld tool result is kept for
+a short time, and the person it belongs to can release that one result.
 
 This layer is additive. It runs after the application's own request
 authority and approval checks and can only deny, never grant.
@@ -52,6 +54,8 @@ ADMIN_CHANGE = "ADMIN_CHANGE"
 WRITE = "WRITE"
 READ = "READ"
 OTHER = "TOOL"
+# Source name of a person's message in the text checks.
+MESSAGE = "message"
 ALL_ACTIONS = (OUTBOUND, SECRET_READ, PRIVATE_READ, EXECUTE, ADMIN_CHANGE, WRITE, READ, OTHER)
 # Second halves of a pair are evaluated first, so a blocked call records nothing.
 _EVALUATION_ORDER = (OUTBOUND, EXECUTE, ADMIN_CHANGE, WRITE, OTHER, READ, PRIVATE_READ, SECRET_READ)
@@ -104,7 +108,8 @@ _HOST_PROBE_PATTERN = re.compile(
 # mode is configured.
 _PROTECTED_PATTERN = re.compile(
     r"(unveil_guard|unveil_security_routes|tool_execution\.py|mcp_manager\.py|auth\.json|audit\.key|"
-    r"guard_audit\.jsonl|audit_anchor\.json|UNVEIL_GUARD_|UNVEIL_AUDIT_KEY|UNVEIL_WATCH_|UNVEIL_ROOM_|command_room)",
+    r"guard_audit\.jsonl|audit_anchor\.json|UNVEIL_GUARD_|UNVEIL_AUDIT_KEY|UNVEIL_WATCH_|UNVEIL_ROOM_|command_room|"
+    r"unveil/security)",
     re.IGNORECASE,
 )
 _APP_ROOT = str(Path(__file__).resolve().parents[2])
@@ -113,6 +118,9 @@ _CHANGING_ACTIONS = frozenset({"WRITE", "EXECUTE", "ADMIN_CHANGE"})
 _HUMAN_APPROVAL_TOOLS = frozenset({
     "manage_settings", "manage_tokens", "manage_mcp", "manage_endpoints", "manage_webhooks",
 })
+# How long a withheld tool result is kept for the person to release, and how many are kept.
+RELEASE_SECONDS = 900
+MAX_HELD_RESULTS = 20
 # How long the status stays "blocked" after the latest block.
 RECENT_BLOCK_SECONDS = 600
 
@@ -124,6 +132,22 @@ def _data_dir() -> Path:
     path = Path(DATA_DIR) / "unveil"
     path.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def _digest(text: Any) -> str:
+    return hashlib.sha256((text if isinstance(text, str) else "").encode("utf-8", "replace")).hexdigest()[:12]
+
+
+def _strings(value: Any):
+    """Yield each string inside a tool result."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _strings(item)
 
 
 def _load_key(directory: Path) -> bytes:
@@ -210,6 +234,7 @@ class UnveilGuard:
         self._last_timestamp = 0.0
         self._recent: deque[dict] = deque(maxlen=200)
         self._counts = {"allowed": 0, "blocked": 0}
+        self._held: dict[str, dict] = {}
         self._lockdown: Optional[str] = None
         self.started_at = clock()
 
@@ -228,11 +253,11 @@ class UnveilGuard:
         self._lockdown = None
 
     # -- decisions --------------------------------------------------------
-    def _remember(self, tool, actions, decision, reason, agent, session_id, owner=None) -> None:
+    def _remember(self, tool, actions, decision, reason, agent, session_id, owner=None, **extra) -> None:
         with self._lock:
             self._recent.appendleft({
                 "at": self._clock(), "tool": tool, "actions": list(actions), "decision": decision,
-                "reason": reason, "agent": agent, "session": (session_id or "")[:12], "owner": owner or "",
+                "reason": reason, "agent": agent, "session": (session_id or "")[:12], "owner": owner or "", **extra,
             })
 
     def _audit_block(self, reason: str, event: dict) -> None:
@@ -278,14 +303,13 @@ class UnveilGuard:
             for first, second in self.sequences:
                 if verdict == "ALLOW" and first in present and second in present:
                     verdict, reason = "BLOCK", f"correlated_actions:{first}->{second}:same_call"
-            digest = hashlib.sha256((content or "").encode("utf-8", "replace")).hexdigest()[:12]
             # One decision at a time, with a clock that never runs backwards, so
             # concurrent calls cannot trip the monitor's ordering checks.
             with self._eval_lock:
                 self._last_timestamp = max(self._clock(), self._last_timestamp)
                 event = {
                     "trace_id": session_id or agent, "agent_id": agent,
-                    "resource": f"{tool}#{digest}", "timestamp": self._last_timestamp,
+                    "resource": f"{tool}#{_digest(content)}", "timestamp": self._last_timestamp,
                 }
                 if owner:
                     event["parent_agent_id"] = f"owner:{owner}"
@@ -305,28 +329,76 @@ class UnveilGuard:
         self._remember(tool, actions, verdict, reason, agent, session_id, owner)
         return GuardDecision(allowed, reason, actions)
 
-    def check_message(self, text: str, *, owner: Optional[str], session_id: Optional[str]) -> GuardDecision:
-        """Decide one message from a person. Raises nothing; an internal failure is a BLOCK."""
+    def check_text(self, source: str, text: str, *, owner: Optional[str], session_id: Optional[str],
+                   held: Optional[tuple] = None) -> GuardDecision:
+        """Decide one text before a model reads it. Raises nothing; an internal failure is a BLOCK.
+
+        ``source`` is ``MESSAGE`` for a person's message, or the name of the tool that returned the text.
+        ``held`` is the input and the output of that tool call, kept so the person can release the result.
+        """
         agent = f"session:{session_id or 'none'}"
+        shown: dict[str, str] = {}
         try:
-            text = text if isinstance(text, str) else ""
-            rule = find_rule(text)
-            if rule is None:
+            finding = find_rule(text if isinstance(text, str) else "", content=source != MESSAGE)
+            if finding is None:
                 return GuardDecision(True, "allowed_by_policy", ())
-            reason = f"text_check:{rule}"
-            event = {
-                "trace_id": session_id or agent, "agent_id": agent, "action": "MESSAGE",
-                "resource": "message#" + hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()[:12],
-            }
+            reason = f"text_check:{finding.rule}"
+            event = {"trace_id": session_id or agent, "agent_id": agent, "action": "TEXT",
+                     "resource": f"{source}#{_digest(text)}"}
             if owner:
                 event["parent_agent_id"] = f"owner:{owner}"
             self._audit_block(reason, event)
+            shown["excerpt"] = finding.excerpt
+            if held is not None:
+                shown["release_id"] = self._hold(source, held, owner, session_id)
         except Exception as error:  # an internal failure is a BLOCK
             logger.exception("UNVEIL guard failure")
             reason = f"guard_error:{type(error).__name__}"
         self._counts["blocked"] += 1
-        self._remember("message", (), "BLOCK", reason, agent, session_id, owner)
+        self._remember(source, (), "BLOCK", reason, agent, session_id, owner, **shown)
         return GuardDecision(False, reason, ())
+
+    # -- release by a person ---------------------------------------------
+    def _hold(self, tool: str, held: tuple, owner: Optional[str], session_id: Optional[str]) -> str:
+        content, output = held
+        now = self._clock()
+        release_id = secrets.token_urlsafe(16)
+        with self._lock:
+            for expired in [key for key, entry in self._held.items() if entry["expires"] <= now]:
+                del self._held[expired]
+            while len(self._held) >= MAX_HELD_RESULTS:
+                del self._held[next(iter(self._held))]
+            self._held[release_id] = {
+                "call": (owner or "", session_id or "", tool, _digest(content)), "output": output,
+                "expires": now + RELEASE_SECONDS, "released": False,
+            }
+        return release_id
+
+    def release(self, release_id: str, owner: str) -> bool:
+        """A person releases one withheld result. Only the person it belongs to can do it, one time."""
+        with self._lock:
+            entry = self._held.get(release_id)
+            if entry is None or entry["released"] or entry["expires"] <= self._clock() or entry["call"][0] != owner:
+                return False
+            self.monitor.audit_log.append("runtime_effect_decision", {
+                "decision": "ALLOW", "reason": "released_by_person",
+                "event": {"trace_id": entry["call"][1], "agent_id": f"owner:{owner}", "action": "RELEASE",
+                          "resource": f"{entry['call'][2]}#{entry['call'][3]}"}})
+            entry["released"] = True
+            for row in self._recent:
+                if row.get("release_id") == release_id:
+                    row["released"] = True
+        return True
+
+    def take_released(self, tool: str, content: str, *, owner: Optional[str], session_id: Optional[str]):
+        """Return the output a person released for this exact call, one time, or None."""
+        call = (owner or "", session_id or "", tool, _digest(content))
+        with self._lock:
+            for release_id, entry in self._held.items():
+                if entry["released"] and entry["call"] == call and entry["expires"] > self._clock():
+                    del self._held[release_id]
+                    return entry["output"]
+        return None
 
     @staticmethod
     def _looking_around(actions: tuple[str, ...], content: str) -> Optional[str]:
@@ -409,13 +481,38 @@ def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id
 def guard_message(text: str, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
     """Gate used where a person's message enters. Returns None to proceed, or the refusal text."""
     try:
-        decision = get_guard().check_message(text, owner=owner, session_id=session_id)
+        decision = get_guard().check_text(MESSAGE, text, owner=owner, session_id=session_id)
     except Exception as error:  # the guard could not even be built: fail closed
         logger.exception("UNVEIL guard unavailable")
         return f"UNVEIL guard is unavailable ({type(error).__name__}); the message was not sent to the model."
     if not decision.blocked:
         return None
     return f"Blocked by the UNVEIL security layer ({decision.reason}). The message was not sent to the model."
+
+
+def guard_tool_result(tool: str, content: str, output: tuple, *, owner: Optional[str], session_id: Optional[str]):
+    """Gate used by the tool dispatcher after a tool ran. Returns None to pass the output on, or a withheld result tuple."""
+    try:
+        decision = get_guard().check_text(tool, "\n".join(_strings(output)), owner=owner, session_id=session_id,
+                                          held=(content, output))
+        if not decision.blocked:
+            return None
+        reason = decision.reason
+    except Exception as error:  # the guard could not even be built: fail closed
+        logger.exception("UNVEIL guard unavailable")
+        reason = f"guard_unavailable:{type(error).__name__}"
+    return f"{tool}: BLOCKED", {
+        "error": f"Withheld by the UNVEIL security layer ({reason}). The action ran, but its result was not given "
+                 "to the model. The person can read the reason in the UNVEIL security panel and release this one "
+                 "result there. After that, the same call returns the result.",
+        "exit_code": 1, "blocked": True, "failure_kind": "unveil_guard_denied",
+        "policy": "unveil_guard", "unveil_reason": reason,
+    }
+
+
+def released_tool_result(tool: str, content: str, *, owner: Optional[str], session_id: Optional[str]):
+    """Used by the tool dispatcher before a tool runs. Returns the output a person released for this call, or None."""
+    return get_guard().take_released(tool, content, owner=owner, session_id=session_id)
 
 
 def guarded_call():

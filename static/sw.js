@@ -7,7 +7,7 @@
 //   - Other static assets (images/fonts/libs): cache-first with bg refresh.
 //   - API / non-GET: never cached.
 // Bump CACHE_NAME whenever the precache list or SW logic changes.
-const CACHE_NAME = 'odysseus-v1140-pr40-editor-precache';
+const CACHE_NAME = 'odysseus-v1141-pr40-editor-precache';
 
 // KaTeX resolves these from its own stylesheet, so caching the CSS without them
 // gives offline math fallback glyphs instead of proper typesetting.
@@ -102,7 +102,7 @@ const PRECACHE = [
   '/static/js/admin.js?v=20260929csssplit',
   '/static/js/chatgptSubscriptionUsage.js',
   '/static/js/init.js?v=20260829chatstyle12',
-  '/static/js/unveilShield.js?v=20261110shield1',
+  '/static/js/unveilShield.js?v=20261113shield2',
   '/static/js/slashCommands.js?v=20260921chatgptusage1',
   '/static/js/research/jobs.js?v=20260910researcherrorpersist1',
   '/static/js/emailInbox.js?v=20260914aireply4',

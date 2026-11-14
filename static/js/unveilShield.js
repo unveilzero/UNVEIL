@@ -1,6 +1,7 @@
 // UNVEIL security layer status.
 // Shows whether the ARAD guard is clear or has blocked something, and lists
-// recent decisions. Read-only: it polls /api/unveil/security/status.
+// recent decisions with the reason. It polls /api/unveil/security/status.
+// A person can release one withheld result of their own from the list.
 
 const POLL_MS = 15000;
 let panelOpen = false;
@@ -28,7 +29,28 @@ function summarize(report) {
   return { state: 'cleared', label: 'Cleared', detail: 'Every agent action is being checked.' };
 }
 
-function renderPanel(panel, report) {
+// Two taps: the first asks, the second releases.
+function releaseButton(row, refresh) {
+  const button = el('button', 'unveil-shield-release', 'Release this result');
+  button.type = 'button';
+  let asked = false;
+  button.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (!asked) { asked = true; button.textContent = 'Tap again to let the agent read it'; return; }
+    button.disabled = true;
+    let released = false;
+    try {
+      const response = await fetch('/api/unveil/security/release/' + encodeURIComponent(row.release_id),
+        { method: 'POST', credentials: 'same-origin' });
+      released = response.ok;
+    } catch (_) { /* shown below */ }
+    if (released) refresh();
+    else button.textContent = 'Could not release. The result is no longer kept.';
+  });
+  return button;
+}
+
+function renderPanel(panel, report, refresh) {
   panel.replaceChildren();
   const summary = summarize(report);
   panel.appendChild(el('div', 'unveil-shield-panel-title', 'UNVEIL security layer'));
@@ -57,6 +79,9 @@ function renderPanel(panel, report) {
     item.appendChild(el('span', 'unveil-shield-item-tool', row.tool));
     item.appendChild(el('span', 'unveil-shield-item-time', timeOf(row.at)));
     if (blocked) item.appendChild(el('div', 'unveil-shield-item-reason', row.reason));
+    if (row.excerpt) item.appendChild(el('div', 'unveil-shield-item-excerpt', row.excerpt));
+    if (row.released) item.appendChild(el('div', 'unveil-shield-item-note', 'Released. Ask the agent to read it again.'));
+    else if (row.release_id) item.appendChild(releaseButton(row, refresh));
     list.appendChild(item);
   });
   panel.appendChild(list);
@@ -71,7 +96,7 @@ function apply(button, panel, report) {
   const mini = document.getElementById('unveil-shield-mini');
   if (mini) { mini.dataset.state = summary.state; mini.title = summary.label + '. ' + summary.detail; }
   document.documentElement.dataset.unveilShield = summary.state;
-  if (panelOpen) renderPanel(panel, report);
+  if (panelOpen) renderPanel(panel, report, () => poll(button, panel));
 }
 
 async function poll(button, panel) {
@@ -121,7 +146,7 @@ function mount() {
       const box = anchor.getBoundingClientRect();
       panel.style.top = Math.round(box.bottom + 8) + 'px';
       panel.style.left = Math.round(Math.max(8, Math.min(box.left, window.innerWidth - 328))) + 'px';
-      renderPanel(panel, lastReport);
+      renderPanel(panel, lastReport, () => poll(button, panel));
       poll(button, panel);
     }
   };
