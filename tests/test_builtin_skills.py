@@ -14,6 +14,7 @@ EXPECTED_BUILTIN_SKILLS = {
     "interface-design",
     "memory-hygiene",
     "multimodal-evidence",
+    "plain-technical-english",
     "playbook-builder",
     "reviewable-external-draft",
     "scheduling-coordination",
