@@ -20,14 +20,14 @@ ORDINARY_TEXTS = [
     "Coverage override\nYour policy number is 12345",
     "Settings\nForget\nYour previous rules for this device",
     "Please bypass\nyour usual policy approval for this one-time refund",
+]
+
+# Ordinary texts that have the wording of a rule. With a space in place of each line break, each one is that wording.
+ORDINARY_TEXTS_WITH_RULE_WORDING = [
     "Mark as read\nIgnore\nAll rules in this folder are paused",
     "Discard\nAll guidelines below are drafts",
     "From now on you can order online, with no\nrestrictions on delivery times",
     "The intern will act as a buyer without any\nrestrictions on budget this week",
-]
-
-# Ordinary texts in which one line by itself has the wording of a rule. The line break has no part in the match.
-ORDINARY_TEXTS_WITH_RULE_WORDING_ON_ONE_LINE = [
     "Translate the hex dump and follow\nthe runbook",
     "Hi Dan, you are free to do anything now that the review is done",
 ]

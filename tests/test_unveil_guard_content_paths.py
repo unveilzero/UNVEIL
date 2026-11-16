@@ -401,13 +401,23 @@ async def test_ordinary_text_in_the_blocks_of_an_html_email_passes(text, layout)
     assert await _withheld_from_an_automatic_pass(HTML_LAYOUTS[layout](html.escape(text).split("\n"))) is False
 
 
+def _each_word_in(opening, closing=""):
+    return "".join(f"{opening}{word}{closing}" for word in WORDING.split())
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("body", [
-    "".join(f"<span>{word}</span>" for word in WORDING.split()),
+    _each_word_in("<span>", "</span>"),
     WORDING.replace(" ", "<!-- -->"),
     WORDING.replace("Note", "No<b></b>te"),
     f"<div><p>{WORDING}</p></div>",
-], ids=["inline elements", "comments", "markup inside a word", "one block"])
+    _each_word_in("<td>"),
+    _each_word_in("<td>", "</td>"),
+    _each_word_in("<p>"),
+    _each_word_in("<li class='item' data-width=\"2\">"),
+    _each_word_in("", "<hr>"),
+], ids=["inline elements", "comments", "markup inside a word", "one block", "cells not closed", "cells", "blocks not closed",
+        "items with attributes", "rules"])
 async def test_html_email_is_read_with_inline_tags_removed_and_with_inline_tags_as_a_space(body):
     assert await _withheld_from_an_automatic_pass(body) is True
     assert _last_block()["tool"] == "email" and _last_block()["owner"] == "alice"
