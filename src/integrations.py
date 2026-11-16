@@ -16,6 +16,7 @@ from core.atomic_io import atomic_write_json
 from core.platform_compat import safe_chmod
 from src.secret_storage import decrypt, encrypt, is_encrypted
 from src.constants import DATA_DIR, INTEGRATIONS_FILE, SETTINGS_FILE
+from src.tool_parsing import strip_angle_tags
 
 log = logging.getLogger(__name__)
 
@@ -337,7 +338,7 @@ def delete_integration(integration_id: str) -> bool:
 
 def _strip_html_tags(html: str) -> str:
     """Rough HTML tag stripping."""
-    text = re.sub(r"<[^>]+>", "", html)
+    text = strip_angle_tags(html)
     text = re.sub(r"\s+", " ", text).strip()
     return text
 

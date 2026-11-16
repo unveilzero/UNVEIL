@@ -39,6 +39,7 @@ from typing import Optional, List
 
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.secret_storage import decrypt as _decrypt
+from src.tool_parsing import strip_angle_tags
 from src.unveil_guard import guard_content
 from src.url_safety import OutboundAddressBlocked, connect_outbound_tcp
 
@@ -1790,7 +1791,6 @@ def _extract_html(msg):
     return None
 
 
-_HTML_TAG = re.compile(r"<[^>]+>")
 # Tags that start or end a line of text, when one or more of them are next to each other.
 _HTML_LINE_TAGS = re.compile(
     r"(?:</?(?:address|article|aside|blockquote|caption|center|dd|div|dl|dt|fieldset|figcaption|figure|footer|form"
@@ -1804,8 +1804,8 @@ def _html_to_text(raw_html: str, inline: str = "") -> str:
     second reading that the text check makes.
     """
     text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.I)
-    text = html.unescape(_HTML_TAG.sub(inline, _HTML_LINE_TAGS.sub("\n", text)))
-    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = html.unescape(strip_angle_tags(_HTML_LINE_TAGS.sub("\n", text), inline))
+    text = re.sub(r"(?<![ \t])[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
@@ -1844,13 +1844,15 @@ async def _email_withheld(msg, message_id: str, text: str, owner: str) -> bool:
 
     ``text`` is what the model gets of the email. Markup inside a line can join or split words in a way
     that this one reading does not show. So the check also reads each HTML body a second time, with a
-    space in place of each tag inside a line.
+    space in place of each tag inside a line. The second reading and the check run on a worker thread.
     """
+    def withheld():
+        return guard_content(
+            "email", text + "".join(f"\n\n{_html_to_text(body, ' ')}" for is_html, body in _text_bodies(msg) if is_html),
+            owner=owner or None, session_id=None)
+
     key = (owner, message_id)
-    if key not in _guard_withheld and await asyncio.to_thread(
-            guard_content, "email",
-            text + "".join(f"\n\n{_html_to_text(body, ' ')}" for is_html, body in _text_bodies(msg) if is_html),
-            owner=owner or None, session_id=None):
+    if key not in _guard_withheld and await asyncio.to_thread(withheld):
         _guard_withheld.add(key)
     return key in _guard_withheld
 

@@ -378,6 +378,22 @@ def test_a_blank_line_in_an_html_email_stays_a_blank_line():
     assert _html_email("<p>Opening hours</p>\n\n<p>Nine to five</p>", False) == "Opening hours\n\nNine to five"
 
 
+@pytest.mark.asyncio
+async def test_second_reading_of_an_html_email_is_made_off_the_main_loop(monkeypatch):
+    import threading
+    import routes.email.email_helpers as email_helpers
+    threads, read = [], email_helpers._html_to_text
+
+    def reading(raw_html, inline=""):
+        threads.append((inline, threading.current_thread() is threading.main_thread()))
+        return read(raw_html, inline)
+
+    monkeypatch.setattr(email_helpers, "_html_to_text", reading)
+    message = _html_message(f"<p>{HOURS}</p>")
+    assert await email_helpers._email_withheld(message, uuid.uuid4().hex, HOURS, "alice") is False
+    assert threads == [(" ", False)]
+
+
 HTML_LAYOUTS = {
     "paragraphs": lambda lines: "".join(f"<p>{line}</p>" for line in lines),
     "paragraphs not closed": lambda lines: "".join(f"<p>{line}" for line in lines),

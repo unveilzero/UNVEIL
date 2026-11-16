@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 server = Server("email")
 EMAIL_SOCKET_TIMEOUT = float(os.environ.get("EMAIL_SOCKET_TIMEOUT", "20"))
+from src.tool_parsing import strip_angle_tags
 from src.constants import DATA_DIR as _DATA_DIR, APP_DB, EMAIL_CACHE_DB, SETTINGS_FILE as _SETTINGS_FILE, MAIL_ATTACHMENTS_DIR
 try:
     from src.constants import SCHEDULED_EMAILS_DB
@@ -937,7 +938,7 @@ def _extract_text(msg):
                     charset = part.get_content_charset() or "utf-8"
                     raw_html = payload.decode(charset, errors="replace")
                     text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.I)
-                    text = re.sub(r"<[^>]+>", "", text)
+                    text = strip_angle_tags(text)
                     text = html.unescape(text)
                     text_parts.append(text.strip())
         return "\n".join(text_parts)
@@ -949,9 +950,9 @@ def _extract_text(msg):
             if msg.get_content_type() == "text/html":
                 text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
                 text = re.sub(r"</(?:p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
-                text = re.sub(r"<[^>]+>", "", text)
+                text = strip_angle_tags(text)
                 text = html.unescape(text)
-                text = re.sub(r"[ \t]+\n", "\n", text)
+                text = re.sub(r"(?<![ \t])[ \t]+\n", "\n", text)
                 text = re.sub(r"\n{3,}", "\n\n", text)
             return text.strip()
     return ""

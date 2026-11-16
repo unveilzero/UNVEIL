@@ -644,7 +644,7 @@ def _message_id_chain(*values: str) -> list[str]:
     seen = set()
     out = []
     for value in values:
-        for mid in re.findall(r"<[^>]+>", value or ""):
+        for mid in re.findall(r"<[^<>]+>", value or ""):
             if mid not in seen:
                 seen.add(mid)
                 out.append(mid)
