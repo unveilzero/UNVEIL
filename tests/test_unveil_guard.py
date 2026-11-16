@@ -167,6 +167,13 @@ def test_internal_failure_is_a_block(tmp_path, monkeypatch):
     assert decision.blocked and decision.reason == "guard_error:ZeroDivisionError"
 
 
+def test_classification_failure_is_a_block(tmp_path, monkeypatch):
+    guard = _guard(tmp_path)
+    monkeypatch.setattr("src.tool_capabilities.capabilities_for_action", lambda tool, content: 1 / 0)
+    decision = guard.check("bash", "printenv", owner="alice", session_id="s1")
+    assert decision.blocked and decision.reason == "guard_error:ZeroDivisionError"
+
+
 def test_audit_log_never_contains_tool_input(tmp_path):
     guard = _guard(tmp_path)
     guard.check("read_file", '{"path": ".env", "marker": "TOP-SECRET-VALUE"}', owner="george", session_id="s1")

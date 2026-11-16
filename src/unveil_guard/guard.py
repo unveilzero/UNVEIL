@@ -44,6 +44,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Optional
 
+from src.owner_identity import auth_disabled
+
 from .arad.runtime_monitor import RuntimeEffectMonitor
 from .text_checks import find_rule
 
@@ -169,26 +171,22 @@ def _load_key(directory: Path) -> bytes:
 
 
 def classify(tool: str, content: str) -> tuple[str, ...]:
-    """Map one tool call onto the monitor's action names."""
+    """Map one tool call onto the monitor's action names. An error is raised to the caller, which blocks the call."""
+    from src.tool_capabilities import ToolEffect, capabilities_for_action
+    effects = capabilities_for_action(tool, content).effects
     actions: set[str] = set()
-    try:
-        from src.tool_capabilities import ToolEffect, capabilities_for_action
-        effects = capabilities_for_action(tool, content).effects
-    except Exception:  # classification must never stop the guard from deciding
-        effects, ToolEffect = frozenset(), None
-    if ToolEffect is not None:
-        if effects & {ToolEffect.NETWORK_EGRESS, ToolEffect.EXTERNAL_SIDE_EFFECT}:
-            actions.add(OUTBOUND)
-        if ToolEffect.READ_PRIVATE in effects:
-            actions.add(PRIVATE_READ)
-        if ToolEffect.EXECUTE_CODE in effects:
-            actions.add(EXECUTE)
-        if ToolEffect.ADMIN_CHANGE in effects:
-            actions.add(ADMIN_CHANGE)
-        if effects & {ToolEffect.WRITE_WORKSPACE, ToolEffect.WRITE_PRIVATE, ToolEffect.DESTRUCTIVE}:
-            actions.add(WRITE)
-        if effects & {ToolEffect.READ_PUBLIC, ToolEffect.READ_WORKSPACE, ToolEffect.BROKERED_NETWORK_READ}:
-            actions.add(READ)
+    if effects & {ToolEffect.NETWORK_EGRESS, ToolEffect.EXTERNAL_SIDE_EFFECT}:
+        actions.add(OUTBOUND)
+    if ToolEffect.READ_PRIVATE in effects:
+        actions.add(PRIVATE_READ)
+    if ToolEffect.EXECUTE_CODE in effects:
+        actions.add(EXECUTE)
+    if ToolEffect.ADMIN_CHANGE in effects:
+        actions.add(ADMIN_CHANGE)
+    if effects & {ToolEffect.WRITE_WORKSPACE, ToolEffect.WRITE_PRIVATE, ToolEffect.DESTRUCTIVE}:
+        actions.add(WRITE)
+    if effects & {ToolEffect.READ_PUBLIC, ToolEffect.READ_WORKSPACE, ToolEffect.BROKERED_NETWORK_READ}:
+        actions.add(READ)
     text = content if isinstance(content, str) else ""
     if tool.startswith("mcp__"):
         actions.add(OUTBOUND)
@@ -379,10 +377,15 @@ class UnveilGuard:
         return release_id
 
     def release(self, release_id: str, owner: str) -> bool:
-        """A person releases one withheld result. Only the person it belongs to can do it, one time."""
+        """A person releases one withheld result. Only the person it belongs to can do it, one time.
+
+        A result with no owner belongs to the one person of a server that runs with login off.
+        """
         with self._lock:
             entry = self._held.get(release_id)
             if entry is None or entry["released"] or entry["expires"] <= self._clock() or entry["call"][0] != owner:
+                return False
+            if not owner and not auth_disabled():
                 return False
             self.monitor.audit_log.append("runtime_effect_decision", {
                 "decision": "ALLOW", "reason": "released_by_person",
@@ -482,10 +485,13 @@ def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id
     }
 
 
-def guard_message(text: str, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
-    """Gate used where a person's message enters. Returns None to proceed, or the refusal text."""
+def guard_message(text: Any, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
+    """Gate used where a person's message enters. Returns None to proceed, or the refusal text.
+
+    ``text`` is the message, or its list of parts; each text part is read.
+    """
     try:
-        decision = get_guard().check_text(MESSAGE, text, owner=owner, session_id=session_id)
+        decision = get_guard().check_text(MESSAGE, "\n".join(_strings(text)), owner=owner, session_id=session_id)
     except Exception as error:  # the guard could not even be built: fail closed
         logger.exception("UNVEIL guard unavailable")
         return f"UNVEIL guard is unavailable ({type(error).__name__}); the message was not sent to the model."

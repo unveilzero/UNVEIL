@@ -1788,6 +1788,17 @@ def _extract_html(msg):
     return None
 
 
+def _html_to_text(raw_html: str) -> str:
+    """The text of an HTML email body. The end of a line, of a block or of a table cell separates words."""
+    text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.I)
+    text = re.sub(r"</(?:p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
+    text = re.sub(r"</t[dh]\s*>", " ", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = html.unescape(text)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
 def _extract_text(msg):
     if msg.is_multipart():
         text_parts = []
@@ -1803,11 +1814,7 @@ def _extract_text(msg):
                 payload = part.get_payload(decode=True)
                 if payload:
                     charset = part.get_content_charset() or "utf-8"
-                    raw_html = payload.decode(charset, errors="replace")
-                    text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.I)
-                    text = re.sub(r"<[^>]+>", "", text)
-                    text = html.unescape(text)
-                    text_parts.append(text.strip())
+                    text_parts.append(_html_to_text(payload.decode(charset, errors="replace")))
         return "\n".join(text_parts)
     else:
         payload = msg.get_payload(decode=True)
@@ -1815,12 +1822,7 @@ def _extract_text(msg):
             charset = msg.get_content_charset() or "utf-8"
             text = payload.decode(charset, errors="replace")
             if msg.get_content_type() == "text/html":
-                text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
-                text = re.sub(r"</(?:p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
-                text = re.sub(r"<[^>]+>", "", text)
-                text = html.unescape(text)
-                text = re.sub(r"[ \t]+\n", "\n", text)
-                text = re.sub(r"\n{3,}", "\n\n", text)
+                return _html_to_text(text)
             return text.strip()
     return ""
 

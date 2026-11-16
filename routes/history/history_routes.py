@@ -21,7 +21,7 @@ from routes.session_routes import (
     _reject_compact_during_active_run,
     _verify_session_owner,
 )
-from routes.chat_helpers import strip_tui_local_context
+from routes.chat_helpers import _enforce_message_guard, strip_tui_local_context
 
 logger = logging.getLogger(__name__)
 
@@ -475,6 +475,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             content = body.get("content", "")
             if not content:
                 raise HTTPException(400, "content is required")
+            _enforce_message_guard(content, owner=effective_user(request), session_id=session_id)
             metadata = sanitize_client_message_metadata(body.get("metadata"))
             _reserve_message_uploads(request, content, metadata)
             msg = ChatMessage(role=role, content=content, metadata=metadata)
@@ -573,6 +574,7 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             content = body.get("content")
             if not msg_id or content is None:
                 raise HTTPException(400, "msg_id and content are required")
+            _enforce_message_guard(content, owner=effective_user(request), session_id=session_id)
 
             _reserve_message_uploads(request, content)
 

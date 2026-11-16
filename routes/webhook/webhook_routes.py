@@ -244,6 +244,7 @@ def setup_webhook_routes(
         token_owner = getattr(request.state, "api_token_owner", None)
 
         from core.models import ChatMessage
+        from routes.chat_helpers import _enforce_message_guard
         from src.llm_core import llm_call_async
         from src.endpoint_resolver import build_chat_url, build_headers, build_models_url, normalize_base
 
@@ -252,6 +253,7 @@ def setup_webhook_routes(
             raise HTTPException(400, "Message is required")
 
         session_id = body.session
+        _enforce_message_guard(message, owner=token_owner, session_id=session_id)
         sess = None
 
         # --- Case 1: Resume an existing session ---

@@ -934,7 +934,7 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                 # it. A withheld email gets no automatic work in this pass.
                 _guard_key = (account_owner or "", message_id)
                 if _guard_key not in _guard_withheld and await asyncio.to_thread(
-                        guard_content, "email", f"{sender}\n{subject}\n{body_for_llm}",
+                        guard_content, "email", f"{sender}\n{subject}\n{msg.get('Date', '')}\n{body_for_llm}",
                         owner=account_owner or None, session_id=None):
                     _guard_withheld.add(_guard_key)
                 if _guard_key in _guard_withheld:

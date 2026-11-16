@@ -6728,6 +6728,16 @@ def setup_email_routes():
             if not body:
                 return {"success": False, "error": "No body provided"}
 
+            # UNVEIL security layer: the email is read before the model gets it.
+            withheld = await asyncio.to_thread(
+                guard_outside_text, "email", f"{sender}\n{subject}\n{body}", owner=owner, session_id=None)
+            if withheld:
+                return {
+                    "success": False,
+                    "error": withheld_notice("Email", withheld),
+                    "error_code": "unveil_guard_withheld",
+                }
+
             body_hash = email_translation_body_hash(body)
             try:
                 _c = _sql3.connect(SCHEDULED_DB)

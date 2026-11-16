@@ -1,8 +1,10 @@
 """UNVEIL security layer: text checks on outside content that does not come through the tool dispatcher."""
 
 import asyncio
+import email
 import inspect
 import json
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -328,10 +330,111 @@ def test_email_routes_and_the_automatic_pass_read_email_before_a_model_gets_it()
         "_import_calendar_attachments(", "_generate_scheduled_email_summary(", "task_llm_call_async("))
 
 
+def _html_email(body, multipart):
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from routes.email.email_helpers import _extract_text
+    message = MIMEText(body, "html")
+    if multipart:
+        message, part = MIMEMultipart("alternative"), message
+        message.attach(part)
+    return _extract_text(email.message_from_bytes(message.as_bytes()))
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+def test_words_in_the_cells_and_blocks_of_an_html_email_stay_separate_words(multipart):
+    text = _html_email("<table><tr><td>Opening</td><td>hours</td></tr><tr><th>nine</th><th>to five</th></tr></table>"
+                       "<p>Closed</p><div>on Sunday</div>", multipart)
+    assert text.split() == ["Opening", "hours", "nine", "to", "five", "Closed", "on", "Sunday"]
+
+
+@pytest.mark.parametrize("multipart", [False, True])
+def test_a_word_with_markup_inside_it_in_an_html_email_stays_one_word(multipart):
+    assert _html_email("<p>Open<b></b>ing <i>hou</i>rs</p>", multipart) == "Opening hours"
+
+
+def test_html_email_with_wording_for_the_model_in_table_cells_is_withheld():
+    text = _html_email("<table><tr>" + "".join(f"<td>{word}</td>" for word in WORDING.split()) + "</tr></table>", False)
+    assert guard_outside_text("email", text, owner="alice", session_id=None) == REASON
+
+
+def _translate(monkeypatch, data):
+    import src.endpoint_resolver as endpoint_resolver
+    import src.llm_core as llm_core
+    from routes.email import email_routes
+
+    async def model(candidates, messages, **options):
+        model.read.append(messages)
+        return "<<<TRANSLATION>>>\nHorario\n<<<END>>>"
+
+    model.read = []
+    monkeypatch.setattr(llm_core, "llm_call_async_with_fallback", model)
+    monkeypatch.setattr(endpoint_resolver, "resolve_endpoint", lambda role, owner=None: ("http://127.0.0.1:9", "stub", {}))
+    monkeypatch.setattr(endpoint_resolver, "resolve_utility_fallback_candidates", lambda owner=None: [])
+    route = [route for route in email_routes.setup_email_routes().routes if route.path.endswith("/translate")][-1]
+    return asyncio.run(route.endpoint(data, owner="alice")), model.read
+
+
+def test_ordinary_email_is_translated(monkeypatch, tmp_path):
+    monkeypatch.setattr("routes.email.email_routes.SCHEDULED_DB", tmp_path / "scheduled.db")
+    result, read = _translate(monkeypatch, {"from": "shop@example.com", "subject": "Hours", "body": ORDINARY,
+                                            "target_language": "Spanish"})
+    assert len(read) == 1 and result.get("translation") == "Horario"
+
+
+@pytest.mark.parametrize("field", ["from", "subject", "body"])
+def test_email_with_wording_for_the_model_is_not_translated(monkeypatch, tmp_path, field):
+    monkeypatch.setattr("routes.email.email_routes.SCHEDULED_DB", tmp_path / "scheduled.db")
+    data = {"from": "shop@example.com", "subject": "Hours", "body": ORDINARY, "target_language": "Spanish", field: WORDING}
+    result, read = _translate(monkeypatch, data)
+    assert read == [] and result["success"] is False and result["error_code"] == "unveil_guard_withheld"
+    assert _last_block()["tool"] == "email" and _last_block()["owner"] == "alice"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header, withheld", [("Tue, 01 Jan 2026 12:00:00 +0000", False), (WORDING, True)])
+async def test_automatic_pass_reads_the_date_line_of_an_email(monkeypatch, tmp_path, header, withheld):
+    import routes.email_helpers as email_helpers
+    import routes.email_pollers as email_pollers
+
+    db_path = tmp_path / "scheduled_emails.db"
+    monkeypatch.setattr(email_helpers, "SCHEDULED_DB", db_path)
+    monkeypatch.setattr(email_pollers, "SCHEDULED_DB", db_path)
+    email_helpers._init_scheduled_db()
+    raw_email = (f"From: Sender <sender@example.com>\r\nTo: Alice <alice@example.com>\r\nSubject: Hours\r\n"
+                 f"Message-ID: <{uuid.uuid4().hex}@example.com>\r\nDate: {header}\r\n"
+                 "Content-Type: text/plain; charset=utf-8\r\n\r\n" + "The shop opens at nine and closes at five. " * 8).encode()
+
+    class Mailbox:
+        def select(self, folder, readonly=True):
+            return "OK", []
+
+        def uid(self, command, *args):
+            return "OK", [b"1"] if command == "SEARCH" else [(b"1 (RFC822)", raw_email)]
+
+        def logout(self):
+            pass
+
+    summaries = []
+
+    async def summary(**options):
+        summaries.append(options)
+        return "- Opening hours"
+
+    monkeypatch.setattr(email_pollers, "_load_settings", lambda: {"email_auto_summarize": True})
+    monkeypatch.setattr(email_pollers, "_owner_for_email_account", lambda account_id: "alice")
+    monkeypatch.setattr(email_pollers, "_imap_connect", lambda account_id=None, owner="": Mailbox())
+    monkeypatch.setattr(email_pollers, "_get_email_config", lambda account_id=None, owner="": {"from_address": "alice@example.com"})
+    monkeypatch.setattr(email_pollers, "resolve_task_candidates", lambda owner=None: [("http://127.0.0.1:9", "stub", {})])
+    monkeypatch.setattr(email_pollers, "_generate_scheduled_email_summary", summary)
+    result = await email_pollers._auto_summarize_pass_single(account_id="acct-alice")
+    assert ("1 withheld" in result) is withheld and len(summaries) == (0 if withheld else 1)
+
+
 # -- research pages -----------------------------------------------------
 
-def _read_research_page(content):
-    page = ResearchPage(url="https://example.com/a", title="Example", content=content, success=True)
+def _read_research_page(content, title="Example"):
+    page = ResearchPage(url="https://example.com/a", title=title, content=content, success=True)
 
     async def fetch(url, *, timeout=10):
         return page
@@ -352,7 +455,7 @@ def _read_research_page(content):
     researcher.owner = "alice"
     researcher.session_id = "s1"
     researcher._llm = llm
-    finding = asyncio.run(researcher._fetch_and_extract("https://example.com/a", "What are the opening hours?", "Example"))
+    finding = asyncio.run(researcher._fetch_and_extract("https://example.com/a", "What are the opening hours?", title))
     return finding, llm.read, researcher
 
 
@@ -371,6 +474,11 @@ def test_research_page_with_wording_for_the_model_is_skipped():
     assert researcher.get_stats()["Pages withheld"] == 1
     assert trace[-1]["status"] == "withheld" and trace[-1]["error"] == REASON
     assert _last_block()["tool"] == "research_page" and _last_block()["owner"] == "alice"
+
+
+def test_research_page_title_is_read_with_the_page():
+    finding, read, researcher = _read_research_page(f"Opening hours for the shop. {ORDINARY}", title=WORDING)
+    assert finding is None and read == [] and researcher.pages_withheld == 1
 
 
 def _report(pages_withheld):

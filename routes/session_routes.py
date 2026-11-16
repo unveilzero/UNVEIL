@@ -775,8 +775,11 @@ def setup_session_routes(
         body = await request.json()
         messages = body.get("messages", [])
         from core.models import ChatMessage
+        from routes.chat_helpers import _enforce_message_guard
         owner = effective_user(request)
         try:
+            for message in messages:
+                _enforce_message_guard(message.get("content"), owner=owner, session_id=sid)
             for message in messages:
                 missing_id = reserve_message_upload_references(
                     upload_handler,

@@ -3,8 +3,9 @@
 ``find_rule`` reads one text before a model sees it and returns the first
 rule the wording matches, with the wording itself, or ``None``. Outside content is the
 result of a tool: a web page, a file, or any other tool output. It is read
-with the message rules and with the rules for content. The rules are fixed
-in this file and use no model, so they run the same with or without one.
+with the rules for content. Only a message can cancel the person's own
+earlier instructions. The rules are fixed in this file and use no model, so
+they run the same with or without one.
 
 Each text is read in two forms. The plain form removes accents, invisible
 characters and extra spacing. The folded form also turns look-alike digits,
@@ -21,24 +22,35 @@ _TARGETS = r"(instructions?|rules|guidelines|prompts?|directives|directions|rest
 _ROLE = r"you are|you're|you will be|act as|behave as|pretend to be|pretend you are|role-?play as|respond as|answer as"
 _ENCODINGS = r"(base64|rot-?13|hex|binary|morse|cipher)"
 
-_RULES = tuple((name, re.compile(pattern, re.IGNORECASE)) for name, pattern in (
-    # Wording that tells a model to drop the rules it was given. A person can
-    # cancel their own earlier instructions ("my previous instructions").
-    ("instruction_override",
-     r"\b(ignore|disregard|forget|override|bypass|discard)\b[^.!?\n]{0,30}?"
-     r"((?<!\bmy\s)\b(previous|prior|above|earlier|preceding|initial|original)\s+(\w+\s+){0,2}" + _TARGETS + r"\b"
-     r"|\byour\s+(\w+\s+){0,2}(" + _TARGETS + r"|safeguards|safety|polic(y|ies))\b)"
-     r"|\b(ignore|disregard|forget|override|bypass|discard)\s+(all|any|every)\s+(of\s+)?((the|those|these)\s+)?"
-     r"(instructions|rules|guidelines|directives)\b"),
+
+def _rules(*rules: tuple[str, str]) -> tuple:
+    return tuple((name, re.compile(pattern, re.IGNORECASE)) for name, pattern in rules)
+
+
+def _instruction_override(own_words: str) -> tuple[str, str]:
+    """Wording that tells a model to drop the rules it was given. ``own_words`` is the pattern
+    that lets a person cancel their own earlier instructions ("my previous instructions")."""
+    return ("instruction_override",
+            r"\b(ignore|disregard|forget|override|bypass|discard)\b[^.!?]{0,30}?"
+            r"(" + own_words + r"\b(previous|prior|above|earlier|preceding|initial|original)\s+(\w+\s+){0,2}"
+            + _TARGETS + r"\b"
+            r"|\byour\s+(\w+\s+){0,2}(" + _TARGETS + r"|safeguards|safety|polic(y|ies))\b)"
+            r"|\b(ignore|disregard|forget|override|bypass|discard)\s+(all|any|every)\s+(of\s+)?((the|those|these)\s+)?"
+            r"(instructions|rules|guidelines|directives)\b")
+
+
+# The rules that read a person's message and outside content in the same way.
+# A gap between the parts of a phrase ends at the end of a sentence, not at a line break.
+_SHARED_RULES = _rules(
     # Wording that gives a model a role that has no rules.
     ("unrestricted_persona",
-     r"\b(" + _ROLE + r"|from now on)\b[^.!?\n]{0,80}"
+     r"\b(" + _ROLE + r"|from now on)\b[^.!?]{0,80}"
      r"\b(no|without|free of|free from|not bound by|unbound by)\s+((any|all)\s+)?"
      r"(restrictions|rules|limitations|filters|guidelines|ethics|morals|censorship|safeguards)\b"
-     r"|\b(" + _ROLE + r"|simulate|stay in)\b[^.!?\n]{0,60}\b(developer|god|dan|jailbreak|jailbroken)\s+mode\b"
+     r"|\b(" + _ROLE + r"|simulate|stay in)\b[^.!?]{0,60}\b(developer|god|dan|jailbreak|jailbroken)\s+mode\b"
      r"|\b(" + _ROLE + r")\s+(now\s+)?an?\s+(unfiltered|uncensored|unrestricted|amoral|unethical)\b"
      r"|\b(dan|jailbreak|jailbroken)\s+mode\b"
-     r"|\bdan\b[^\n]{0,200}\bdo anything now\b|\bdo anything now\b[^\n]{0,200}\bdan\b"),
+     r"|\bdan\b[\s\S]{0,200}\bdo anything now\b|\bdo anything now\b[\s\S]{0,200}\bdan\b"),
     # Wording that tells a model to switch off its own protections.
     ("safeguard_removal",
      r"\b(disable|turn off|switch off|remove|deactivate|bypass|circumvent|get around|evade)\s+((all|any)\s+)?"
@@ -46,21 +58,23 @@ _RULES = tuple((name, re.compile(pattern, re.IGNORECASE)) for name, pattern in (
      r"(filters?|safeguards?|guardrails?|restrictions|safety|censorship|limitations|moderation|content policy)\b"),
     # Wording that tells a model to follow instructions kept in an encoded form.
     ("encoded_instructions",
-     r"\b(decode|decipher|decrypt|translate|unscramble)\b[^.\n]{0,80}\b" + _ENCODINGS + r"\b[^.\n]{0,80}"
+     r"\b(decode|decipher|decrypt|translate|unscramble)\b[^.]{0,80}\b" + _ENCODINGS + r"\b[^.]{0,80}"
      r"\b(follow|obey|execute|carry out|comply|do what it says)\b"
-     r"|\b(follow|obey|execute|carry out)\b[^.\n]{0,40}\b" + _ENCODINGS + r"\b[^.\n]{0,20}"
+     r"|\b(follow|obey|execute|carry out)\b[^.]{0,40}\b" + _ENCODINGS + r"\b[^.]{0,20}"
      r"\b(instructions?|commands?|message|text)\b"),
-))
+)
+
+_RULES = _rules(_instruction_override(r"(?<!\bmy\s)")) + _SHARED_RULES
 
 _AI_READER = r"(ai|a\.i\.|llm|(large )?language model|ai assistant|ai agent|chatbot)s?"
-_CONTENT_RULES = _RULES + (
+# Outside content does not speak for the person, so it gets no pattern for the person's own words.
+_CONTENT_RULES = _rules(_instruction_override("")) + _SHARED_RULES + _rules(
     # Wording in content that speaks to the model that reads it.
-    ("reader_directive", re.compile(
-        r"\bif you('re| are) an? " + _AI_READER + r"\b"
-        r"|\b(instructions?|note|notice|message|attention)\s+(to|for)\s+((the|any|all)\s+)?" + _AI_READER + r"\b"
-        r"|\b(do not|don't|never)\s+(tell|inform|notify|alert)\s+the\s+(user|human|person|operator)"
-        r"(\s+(about|of|that you|this|anything)\b|\s*([.!\n]|$))",
-        re.IGNORECASE)),
+    ("reader_directive",
+     r"\bif you('re| are) an? " + _AI_READER + r"\b"
+     r"|\b(instructions?|note|notice|message|attention)\s+(to|for)\s+((the|any|all)\s+)?" + _AI_READER + r"\b"
+     r"|\b(do not|don't|never)\s+(tell|inform|notify|alert)\s+the\s+(user|human|person|operator)"
+     r"(\s+(about|of|that you|this|anything)\b|\s*([.!\n]|$))"),
 )
 
 _SPACING = re.compile(r"[^\S\n]+")

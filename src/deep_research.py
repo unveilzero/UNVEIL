@@ -1358,9 +1358,9 @@ class DeepResearcher:
                 else:
                     content = truncated
 
-            # UNVEIL security layer: the page is read before the model gets it.
+            # UNVEIL security layer: the page and its title are read before the model gets them.
             withheld = await asyncio.to_thread(
-                guard_content, "research_page", content,
+                guard_content, "research_page", (title or page.title, content),
                 owner=getattr(self, "owner", None) or None, session_id=getattr(self, "session_id", None) or None)
             if withheld:
                 self.pages_withheld = getattr(self, "pages_withheld", 0) + 1
