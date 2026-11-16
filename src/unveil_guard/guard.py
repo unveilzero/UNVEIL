@@ -485,13 +485,10 @@ def guard_tool_call(tool: str, content: str, *, owner: Optional[str], session_id
     }
 
 
-def guard_message(text: Any, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
-    """Gate used where a person's message enters. Returns None to proceed, or the refusal text.
-
-    ``text`` is the message, or its list of parts; each text part is read.
-    """
+def guard_message(text: str, *, owner: Optional[str], session_id: Optional[str]) -> Optional[str]:
+    """Gate used where a person's message enters. Returns None to proceed, or the refusal text."""
     try:
-        decision = get_guard().check_text(MESSAGE, "\n".join(_strings(text)), owner=owner, session_id=session_id)
+        decision = get_guard().check_text(MESSAGE, text, owner=owner, session_id=session_id)
     except Exception as error:  # the guard could not even be built: fail closed
         logger.exception("UNVEIL guard unavailable")
         return f"UNVEIL guard is unavailable ({type(error).__name__}); the message was not sent to the model."

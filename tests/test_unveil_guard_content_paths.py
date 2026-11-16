@@ -391,9 +391,8 @@ def test_email_with_wording_for_the_model_is_not_translated(monkeypatch, tmp_pat
     assert _last_block()["tool"] == "email" and _last_block()["owner"] == "alice"
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize("header, withheld", [("Tue, 01 Jan 2026 12:00:00 +0000", False), (WORDING, True)])
-async def test_automatic_pass_reads_the_date_line_of_an_email(monkeypatch, tmp_path, header, withheld):
+async def _automatic_pass(monkeypatch, tmp_path, date, content_type, body):
+    """Run the automatic email pass on one email from a stand-in mailbox. Returns the result and the summary calls."""
     import routes.email_helpers as email_helpers
     import routes.email_pollers as email_pollers
 
@@ -402,8 +401,8 @@ async def test_automatic_pass_reads_the_date_line_of_an_email(monkeypatch, tmp_p
     monkeypatch.setattr(email_pollers, "SCHEDULED_DB", db_path)
     email_helpers._init_scheduled_db()
     raw_email = (f"From: Sender <sender@example.com>\r\nTo: Alice <alice@example.com>\r\nSubject: Hours\r\n"
-                 f"Message-ID: <{uuid.uuid4().hex}@example.com>\r\nDate: {header}\r\n"
-                 "Content-Type: text/plain; charset=utf-8\r\n\r\n" + "The shop opens at nine and closes at five. " * 8).encode()
+                 f"Message-ID: <{uuid.uuid4().hex}@example.com>\r\nDate: {date}\r\n"
+                 f"Content-Type: {content_type}; charset=utf-8\r\n\r\n{body}").encode()
 
     class Mailbox:
         def select(self, folder, readonly=True):
@@ -427,8 +426,47 @@ async def test_automatic_pass_reads_the_date_line_of_an_email(monkeypatch, tmp_p
     monkeypatch.setattr(email_pollers, "_get_email_config", lambda account_id=None, owner="": {"from_address": "alice@example.com"})
     monkeypatch.setattr(email_pollers, "resolve_task_candidates", lambda owner=None: [("http://127.0.0.1:9", "stub", {})])
     monkeypatch.setattr(email_pollers, "_generate_scheduled_email_summary", summary)
-    result = await email_pollers._auto_summarize_pass_single(account_id="acct-alice")
+    return await email_pollers._auto_summarize_pass_single(account_id="acct-alice"), summaries
+
+
+HOURS = "The shop opens at nine and closes at five. " * 8
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("header, withheld", [("Tue, 01 Jan 2026 12:00:00 +0000", False), (WORDING, True)])
+async def test_automatic_pass_reads_the_date_line_of_an_email(monkeypatch, tmp_path, header, withheld):
+    result, summaries = await _automatic_pass(monkeypatch, tmp_path, header, "text/plain", HOURS)
     assert ("1 withheld" in result) is withheld and len(summaries) == (0 if withheld else 1)
+
+
+def _each_word_in(opening, closing=""):
+    return "".join(f"{opening}{word}{closing}" for word in WORDING.split())
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    _each_word_in("<td>"),
+    _each_word_in("<p>"),
+    _each_word_in("<li class='item' data-width=\"2\">"),
+    _each_word_in("<span>", "</span>"),
+    _each_word_in("", "<hr>"),
+    WORDING.replace(" ", "<!-- -->"),
+    WORDING.replace("Ignore", "Ig<b></b>nore"),
+], ids=["cells not closed", "blocks not closed", "items with attributes", "inline elements", "rules", "comments",
+        "markup inside a word"])
+async def test_automatic_pass_reads_an_html_email_with_each_tag_removed_and_with_each_tag_as_a_space(monkeypatch, tmp_path, body):
+    result, summaries = await _automatic_pass(monkeypatch, tmp_path, "Tue, 01 Jan 2026 12:00:00 +0000", "text/html",
+                                              f"<html><body><p>{HOURS}</p>{body}</body></html>")
+    assert "1 withheld" in result and summaries == []
+
+
+@pytest.mark.asyncio
+async def test_automatic_pass_gives_an_ordinary_html_email_to_the_model_in_one_reading(monkeypatch, tmp_path):
+    result, summaries = await _automatic_pass(
+        monkeypatch, tmp_path, "Tue, 01 Jan 2026 12:00:00 +0000", "text/html",
+        f"<html><body><table><tr><td>Opening</td><td>hours</td></tr></table><p>{HOURS}</p></body></html>")
+    assert "withheld" not in result and len(summaries) == 1
+    assert summaries[0]["body_for_llm"].startswith("Opening hours\nThe shop opens at nine")
 
 
 # -- research pages -----------------------------------------------------

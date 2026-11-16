@@ -16,6 +16,7 @@ import {
   unbindExpandedCardDismiss,
 } from './escMenuStack.js';
 import { getSettings, invalidateSettings } from './appConfig.js';
+import { writeSessionMessages } from './sessionWrite.js';
 import { orderActionMenuItems, actionMenuRank, SELECT_MENU_ICON } from './actionMenuOrder.js';
 
 const API_BASE = window.location.origin;
@@ -2709,14 +2710,11 @@ async function _openResultInChat(entry) {
     if (!sid) { uiModule.showToast('Chat created but no session id returned'); return; }
 
     // Seed the conversation: a framing user line + the result as assistant.
-    await fetch(`${API_BASE}/api/session/${sid}/inject_messages`, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [
-        { role: 'user', content: `Here is the latest run of my scheduled task "${entry.taskName}". Let's review it.` },
-        { role: 'assistant', content: entry.result || '(no output)' },
-      ] }),
-    });
+    const problem = await writeSessionMessages(API_BASE, sid, [
+      { role: 'user', content: `Here is the latest run of my scheduled task "${entry.taskName}". Let's review it.` },
+      { role: 'assistant', content: entry.result || '(no output)' },
+    ]);
+    if (problem) { uiModule.showError(problem); return; }
 
     closeTasks();
     if (window.sessionModule) {

@@ -253,7 +253,7 @@ def setup_webhook_routes(
             raise HTTPException(400, "Message is required")
 
         session_id = body.session
-        _enforce_message_guard(message, owner=token_owner, session_id=session_id)
+        await _enforce_message_guard(message, owner=token_owner, session_id=session_id)
         sess = None
 
         # --- Case 1: Resume an existing session ---

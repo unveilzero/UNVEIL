@@ -23,6 +23,7 @@ from src.auth_helpers import (
 from src.session_image_cleanup import _generated_image_path_for_cleanup, session_image_refs
 from src.session_actions import is_session_recently_active
 from src.upload_handler import reserve_message_upload_references
+from src.attachment_refs import persistable_message_content
 from src.tool_approval_scopes import sanitize_client_message_metadata
 
 
@@ -778,8 +779,12 @@ def setup_session_routes(
         from routes.chat_helpers import _enforce_message_guard
         owner = effective_user(request)
         try:
-            for message in messages:
-                _enforce_message_guard(message.get("content"), owner=owner, session_id=sid)
+            metadata = [sanitize_client_message_metadata(message.get("metadata")) for message in messages]
+            # UNVEIL security layer: the texts are read as they are stored, and together.
+            await _enforce_message_guard(
+                "\n".join(persistable_message_content(message.get("content"), kept)
+                          for message, kept in zip(messages, metadata)),
+                owner=owner, session_id=sid)
             for message in messages:
                 missing_id = reserve_message_upload_references(
                     upload_handler,
@@ -794,12 +799,8 @@ def setup_session_routes(
                     )
         except (AttributeError, TypeError, ValueError) as exc:
             raise HTTPException(400, "Invalid message attachment metadata") from exc
-        for m in messages:
-            sess.add_message(ChatMessage(
-                m["role"],
-                m["content"],
-                metadata=sanitize_client_message_metadata(m.get("metadata")),
-            ))
+        for m, kept in zip(messages, metadata):
+            sess.add_message(ChatMessage(m["role"], m["content"], metadata=kept))
         session_manager.save_sessions()
         return {"ok": True, "count": len(messages)}
 

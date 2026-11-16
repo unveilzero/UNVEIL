@@ -23,15 +23,22 @@ _ROLE = r"you are|you're|you will be|act as|behave as|pretend to be|pretend you 
 _ENCODINGS = r"(base64|rot-?13|hex|binary|morse|cipher)"
 
 
+# The space between two words that are next to each other in a phrase: one space, or one line break.
+# A blank line is not such a space, so it ends a phrase.
+_WORD_SPACE = r"(?: ?\n ?| )"
+
+
 def _rules(*rules: tuple[str, str]) -> tuple:
-    return tuple((name, re.compile(pattern, re.IGNORECASE)) for name, pattern in rules)
+    """Compile the rules. In a rule, ``\\s+`` stands for the space between two words of a phrase."""
+    return tuple((name, re.compile(pattern.replace(r"\s+", _WORD_SPACE), re.IGNORECASE)) for name, pattern in rules)
 
 
 def _instruction_override(own_words: str) -> tuple[str, str]:
     """Wording that tells a model to drop the rules it was given. ``own_words`` is the pattern
     that lets a person cancel their own earlier instructions ("my previous instructions")."""
     return ("instruction_override",
-            r"\b(ignore|disregard|forget|override|bypass|discard)\b[^.!?]{0,30}?"
+            r"\b(ignore|disregard|forget|override|bypass|discard)\b"
+            r"([^.!?\n]{0,30}?|\s+((all|any|every)\s+)?(of\s+)?((the|those|these)\s+)?)"
             r"(" + own_words + r"\b(previous|prior|above|earlier|preceding|initial|original)\s+(\w+\s+){0,2}"
             + _TARGETS + r"\b"
             r"|\byour\s+(\w+\s+){0,2}(" + _TARGETS + r"|safeguards|safety|polic(y|ies))\b)"
@@ -40,17 +47,17 @@ def _instruction_override(own_words: str) -> tuple[str, str]:
 
 
 # The rules that read a person's message and outside content in the same way.
-# A gap between the parts of a phrase ends at the end of a sentence, not at a line break.
+# A free gap between the parts of a phrase ends at the end of a sentence or of a line.
 _SHARED_RULES = _rules(
     # Wording that gives a model a role that has no rules.
     ("unrestricted_persona",
-     r"\b(" + _ROLE + r"|from now on)\b[^.!?]{0,80}"
+     r"\b(" + _ROLE + r"|from now on)\b[^.!?\n]{0,80}"
      r"\b(no|without|free of|free from|not bound by|unbound by)\s+((any|all)\s+)?"
      r"(restrictions|rules|limitations|filters|guidelines|ethics|morals|censorship|safeguards)\b"
-     r"|\b(" + _ROLE + r"|simulate|stay in)\b[^.!?]{0,60}\b(developer|god|dan|jailbreak|jailbroken)\s+mode\b"
+     r"|\b(" + _ROLE + r"|simulate|stay in)\b[^.!?\n]{0,60}\b(developer|god|dan|jailbreak|jailbroken)\s+mode\b"
      r"|\b(" + _ROLE + r")\s+(now\s+)?an?\s+(unfiltered|uncensored|unrestricted|amoral|unethical)\b"
      r"|\b(dan|jailbreak|jailbroken)\s+mode\b"
-     r"|\bdan\b[\s\S]{0,200}\bdo anything now\b|\bdo anything now\b[\s\S]{0,200}\bdan\b"),
+     r"|\bdan\b[^\n]{0,200}\bdo anything now\b|\bdo anything now\b[^\n]{0,200}\bdan\b"),
     # Wording that tells a model to switch off its own protections.
     ("safeguard_removal",
      r"\b(disable|turn off|switch off|remove|deactivate|bypass|circumvent|get around|evade)\s+((all|any)\s+)?"
@@ -58,9 +65,9 @@ _SHARED_RULES = _rules(
      r"(filters?|safeguards?|guardrails?|restrictions|safety|censorship|limitations|moderation|content policy)\b"),
     # Wording that tells a model to follow instructions kept in an encoded form.
     ("encoded_instructions",
-     r"\b(decode|decipher|decrypt|translate|unscramble)\b[^.]{0,80}\b" + _ENCODINGS + r"\b[^.]{0,80}"
+     r"\b(decode|decipher|decrypt|translate|unscramble)\b[^.\n]{0,80}\b" + _ENCODINGS + r"\b[^.\n]{0,80}"
      r"\b(follow|obey|execute|carry out|comply|do what it says)\b"
-     r"|\b(follow|obey|execute|carry out)\b[^.]{0,40}\b" + _ENCODINGS + r"\b[^.]{0,20}"
+     r"|\b(follow|obey|execute|carry out)\b[^.\n]{0,40}\b" + _ENCODINGS + r"\b[^.\n]{0,20}"
      r"\b(instructions?|commands?|message|text)\b"),
 )
 

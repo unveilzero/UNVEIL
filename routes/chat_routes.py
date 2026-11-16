@@ -77,6 +77,7 @@ from routes.chat_helpers import (
     _allowed_models_for_request,
     _enforce_chat_privileges,
     _enforce_message_guard,
+    _require_checkable_size,
 )
 from src.action_intents import ToolIntent, classify_tool_intent as _classify_tool_intent
 from src.image_model_ids import looks_like_image_generation_model
@@ -2332,7 +2333,7 @@ def setup_chat_routes(
         # Same allowed_models + daily-cap gate as chat_stream (mirror so the
         # non-streaming path can't be used to bypass).
         _enforce_chat_privileges(request, sess)
-        _enforce_message_guard(message, owner=owner, session_id=session)
+        await _enforce_message_guard(message, owner=owner, session_id=session)
 
         tool_policy = build_effective_tool_policy(last_user_message=message)
         allow_tool_preprocessing = not tool_policy.block_all_tool_calls
@@ -3040,7 +3041,7 @@ def setup_chat_routes(
         # Admins always have full privileges via get_privileges (returns
         # ADMIN_PRIVILEGES wholesale) so this is a no-op for them.
         _enforce_chat_privileges(request, sess)
-        _enforce_message_guard(message, owner=effective_user(request), session_id=session)
+        await _enforce_message_guard(message, owner=effective_user(request), session_id=session)
 
         # Ensure session has auth headers
         resolve_session_auth(sess, session, owner=effective_user(request))
@@ -5200,6 +5201,12 @@ def setup_chat_routes(
     @router.post("/api/inject_context/{session_id}")
     async def inject_context(request: Request, session_id: str, context: str = Form(...)) -> Dict[str, str]:
         _verify_session_owner(request, session_id)
+        # UNVEIL security layer: the context is read as outside content before it is kept.
+        _require_checkable_size(context)
+        withheld = await asyncio.to_thread(
+            guard_outside_text, "injected_context", context, owner=effective_user(request), session_id=session_id)
+        if withheld:
+            raise HTTPException(403, {"error": "UNVEIL_GUARD_BLOCKED", "message": withheld_notice("Context", withheld)})
         try:
             sess = session_manager.get_session(session_id)
             msg = untrusted_context_message("injected research context", f"Research Context: {context}")

@@ -14,6 +14,7 @@ from core.database import SessionLocal, ChatMessage as DbChatMessage, Session as
 from src.auth_helpers import effective_user, require_chat_api_token_scope
 from src.topic_analyzer import analyze_topics
 from src.upload_handler import reserve_message_upload_references
+from src.attachment_refs import persistable_message_content
 from src.tool_approval_scopes import sanitize_client_message_metadata
 from routes.session_routes import (
     _message_role,
@@ -475,8 +476,10 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             content = body.get("content", "")
             if not content:
                 raise HTTPException(400, "content is required")
-            _enforce_message_guard(content, owner=effective_user(request), session_id=session_id)
             metadata = sanitize_client_message_metadata(body.get("metadata"))
+            # UNVEIL security layer: the text is read as it is stored.
+            await _enforce_message_guard(
+                persistable_message_content(content, metadata), owner=effective_user(request), session_id=session_id)
             _reserve_message_uploads(request, content, metadata)
             msg = ChatMessage(role=role, content=content, metadata=metadata)
             session_manager.add_message(session_id, msg)
@@ -572,9 +575,9 @@ def setup_history_routes(session_manager, upload_handler=None) -> APIRouter:
             body = await request.json()
             msg_id = body.get("msg_id")
             content = body.get("content")
-            if not msg_id or content is None:
-                raise HTTPException(400, "msg_id and content are required")
-            _enforce_message_guard(content, owner=effective_user(request), session_id=session_id)
+            if not msg_id or not isinstance(content, str):
+                raise HTTPException(400, "msg_id and text content are required")
+            await _enforce_message_guard(content, owner=effective_user(request), session_id=session_id)
 
             _reserve_message_uploads(request, content)
 

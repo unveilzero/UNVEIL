@@ -1788,43 +1788,51 @@ def _extract_html(msg):
     return None
 
 
+_HTML_TAG = re.compile(r"<[^>]+>")
+
+
 def _html_to_text(raw_html: str) -> str:
     """The text of an HTML email body. The end of a line, of a block or of a table cell separates words."""
     text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.I)
     text = re.sub(r"</(?:p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
     text = re.sub(r"</t[dh]\s*>", " ", text, flags=re.I)
-    text = re.sub(r"<[^>]+>", "", text)
-    text = html.unescape(text)
+    text = html.unescape(_HTML_TAG.sub("", text))
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def _extract_text(msg):
-    if msg.is_multipart():
-        text_parts = []
-        for part in msg.walk():
-            ct = part.get_content_type()
-            cd = str(part.get("Content-Disposition", ""))
-            if ct == "text/plain" and "attachment" not in cd:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    text_parts.append(payload.decode(charset, errors="replace"))
-            elif ct == "text/html" and not text_parts and "attachment" not in cd:
-                payload = part.get_payload(decode=True)
-                if payload:
-                    charset = part.get_content_charset() or "utf-8"
-                    text_parts.append(_html_to_text(payload.decode(charset, errors="replace")))
-        return "\n".join(text_parts)
-    else:
+def _text_bodies(msg):
+    """Yield (is_html, decoded text) for each body that the text of a message is made from."""
+    if not msg.is_multipart():
         payload = msg.get_payload(decode=True)
         if payload:
-            charset = msg.get_content_charset() or "utf-8"
-            text = payload.decode(charset, errors="replace")
-            if msg.get_content_type() == "text/html":
-                return _html_to_text(text)
-            return text.strip()
-    return ""
+            yield msg.get_content_type() == "text/html", payload.decode(msg.get_content_charset() or "utf-8", errors="replace")
+        return
+    found = False
+    for part in msg.walk():
+        kind = part.get_content_type()
+        if "attachment" in str(part.get("Content-Disposition", "")):
+            continue
+        # An HTML part is read only when no other body came before it.
+        if kind == "text/plain" or (kind == "text/html" and not found):
+            payload = part.get_payload(decode=True)
+            if payload:
+                found = True
+                yield kind == "text/html", payload.decode(part.get_content_charset() or "utf-8", errors="replace")
+
+
+def _extract_text(msg):
+    text = "\n".join(_html_to_text(body) if is_html else body for is_html, body in _text_bodies(msg))
+    return text if msg.is_multipart() else text.strip()
+
+
+def _html_readings_for_check(msg) -> list[str]:
+    """Two more readings of each HTML body, for the text check only: each tag removed, and each tag as a space.
+
+    Markup can join or split words in a way that the one reading from ``_extract_text`` does not show.
+    """
+    return [html.unescape(_HTML_TAG.sub(joiner, body))
+            for is_html, body in _text_bodies(msg) if is_html for joiner in ("", " ")]
 
 
 def _fetch_sender_thread_context(sender_addr: str,

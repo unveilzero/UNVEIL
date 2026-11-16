@@ -473,13 +473,35 @@ def _allowed_models_for_request(request) -> Optional[frozenset[str]]:
     return _allowed_models_from_privileges(privs)
 
 
-def _enforce_message_guard(message, *, owner, session_id) -> None:
+# The longest text, in characters, that the gates below read in one request. A check runs on a worker
+# thread, but one pattern search does not let other work run. At this size the slowest text measured
+# holds the server for about half a second.
+GUARD_TEXT_LIMIT = 200_000
+
+
+def _require_checkable_size(text: str) -> None:
+    """Raises HTTPException(413) if the text is too long for a text check to read."""
+    if len(text) > GUARD_TEXT_LIMIT:
+        raise HTTPException(413, {
+            "error": "UNVEIL_GUARD_TEXT_TOO_LARGE",
+            "message": f"This text is longer than {GUARD_TEXT_LIMIT:,} characters. UNVEIL reads each text "
+                       "before a model gets it, and does not accept one this long. Send it in parts.",
+        })
+
+
+async def _enforce_message_guard(message: Optional[str], *, owner, session_id) -> None:
     """Apply the UNVEIL guard's text checks to a person's message. Both
     /api/chat and /api/chat_stream must call this BEFORE any LLM work.
+    The check runs on a worker thread, and the size limit keeps its longest step short.
+    A send with attachments only has no message text, and so nothing to read here.
 
-    Raises HTTPException(403) if the guard refuses the message.
+    Raises HTTPException(403) if the guard refuses the message, or
+    HTTPException(413) if the message is too long to read.
     """
-    refusal = guard_message(message, owner=owner, session_id=session_id)
+    if message is None:
+        return
+    _require_checkable_size(message)
+    refusal = await asyncio.to_thread(guard_message, message, owner=owner, session_id=session_id)
     if refusal:
         raise HTTPException(403, {"error": "UNVEIL_GUARD_BLOCKED", "message": refusal})
 

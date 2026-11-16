@@ -9,6 +9,7 @@ import { providerLogo } from './providers.js';
 import { PROMPT_TEMPLATES, getUserTemplates } from './presets.js?v=20260908personaname1';
 import { sortModelObjects } from './modelSort.js';
 import Storage from './storage.js';
+import { writeSessionMessages } from './sessionWrite.js';
 
 let API_BASE = '';
 let _active = false;
@@ -663,11 +664,7 @@ export async function startGroup(models, parentSessionId) {
           _groupEtiquette;
       }
 
-      await fetch(`${API_BASE}/api/session/${data.id}/inject_messages`, {
-        method: 'POST', credentials: 'same-origin',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: [{ role: 'system', content: sysPrompt }]}),
-      }).catch(() => {});
+      await _writeToSession(data.id, [{ role: 'system', content: sysPrompt }]);
     } catch (e) {
       console.error('[group] Failed to create participant session:', m.display, e);
       _participantSessions.push(null);
@@ -713,11 +710,7 @@ export async function sendMessage(msg) {
 
   // Save user message to parent session for persistence
   if (_parentSessionId) {
-    fetch(`${API_BASE}/api/session/${_parentSessionId}/inject_messages`, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [{ role: 'user', content: msg }] }),
-    }).catch(() => {});
+    _writeToSession(_parentSessionId, [{ role: 'user', content: msg }]);
   }
 
   if (_mode === 'parallel') {
@@ -725,6 +718,13 @@ export async function sendMessage(msg) {
   } else {
     await _sendRoundRobin(msg, box);
   }
+}
+
+// Writes messages into a session. When the server does not keep them, it shows the reason and returns false.
+async function _writeToSession(sessionId, messages) {
+  const problem = await writeSessionMessages(API_BASE, sessionId, messages);
+  if (problem) uiModule.showError(problem);
+  return !problem;
 }
 
 function _createGroupBubble(model, box) {
@@ -794,18 +794,12 @@ async function _sendRoundRobin(msg, box) {
     if (response) {
       for (let j = 0; j < _participantSessions.length; j++) {
         if (j === idx || !_participantSessions[j]) continue;
-        try {
-          await fetch(`${API_BASE}/api/session/${_participantSessions[j]}/inject_messages`, {
-            method: 'POST',
-            credentials: 'same-origin',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages: [{
-              role: 'user',
-              content: `[${m._groupName || m.display}]: ${response}`,
-              metadata: { group_peer: true, group_model: m._groupName || m.display, model: m.mid }
-            }]}),
-          });
-        } catch (e) { console.warn('[group] sync failed:', e); }
+        // The same reply goes to each participant, so one write that is not kept ends the sync.
+        if (!await _writeToSession(_participantSessions[j], [{
+          role: 'user',
+          content: `[${m._groupName || m.display}]: ${response}`,
+          metadata: { group_peer: true, group_model: m._groupName || m.display, model: m.mid }
+        }])) break;
       }
     }
   }
@@ -822,18 +816,11 @@ async function _syncAllResponses(holders) {
     const model = _models[i];
     for (let j = 0; j < _participantSessions.length; j++) {
       if (j === i || !_participantSessions[j]) continue;
-      try {
-        await fetch(`${API_BASE}/api/session/${_participantSessions[j]}/inject_messages`, {
-          method: 'POST',
-          credentials: 'same-origin',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messages: [{
-            role: 'user',
-            content: `[${model._groupName || model.display}]: ${response}`,
-            metadata: { group_peer: true, group_model: model._groupName || model.display, model: model.mid }
-          }]}),
-        });
-      } catch (e) { /* silent */ }
+      if (!await _writeToSession(_participantSessions[j], [{
+        role: 'user',
+        content: `[${model._groupName || model.display}]: ${response}`,
+        metadata: { group_peer: true, group_model: model._groupName || model.display, model: model.mid }
+      }])) break;
     }
   }
 }
@@ -964,14 +951,10 @@ async function _streamToHolder(modelIdx, sessionId, msg, holderEl, abortCtrl) {
   // Save response to parent session for persistence
   if (accumulated && _parentSessionId) {
     const gName = _models[modelIdx]._groupName || _models[modelIdx].display;
-    fetch(`${API_BASE}/api/session/${_parentSessionId}/inject_messages`, {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: [{
-        role: 'assistant', content: accumulated,
-        metadata: { group_model: gName, model: _models[modelIdx].mid }
-      }]}),
-    }).catch(() => {});
+    _writeToSession(_parentSessionId, [{
+      role: 'assistant', content: accumulated,
+      metadata: { group_model: gName, model: _models[modelIdx].mid }
+    }]);
   }
 }
 

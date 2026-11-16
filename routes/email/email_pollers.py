@@ -37,7 +37,7 @@ from .email_helpers import (
     _send_smtp_message,
     _imap_connect, _imap, _decode_header,
     _detect_sent_folder, _detect_spam_folder, _imap_move,
-    _extract_attachment_text, _extract_text,
+    _extract_attachment_text, _extract_text, _html_readings_for_check,
     _pre_retrieve_context,
     _attach_compose_uploads, _cleanup_compose_uploads, _q,
     SCHEDULED_DB, _EMAIL_REPLY_SYS_PROMPT_BASE, _email_cache_owner_clause,
@@ -934,7 +934,8 @@ async def _auto_summarize_pass_single(days_back: int = 1, account_id: str | None
                 # it. A withheld email gets no automatic work in this pass.
                 _guard_key = (account_owner or "", message_id)
                 if _guard_key not in _guard_withheld and await asyncio.to_thread(
-                        guard_content, "email", f"{sender}\n{subject}\n{msg.get('Date', '')}\n{body_for_llm}",
+                        guard_content, "email", f"{sender}\n{subject}\n{msg.get('Date', '')}\n{body_for_llm}"
+                        + "".join(f"\n\n{reading}" for reading in _html_readings_for_check(msg)),
                         owner=account_owner or None, session_id=None):
                     _guard_withheld.add(_guard_key)
                 if _guard_key in _guard_withheld:
