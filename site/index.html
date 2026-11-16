@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>UNVEIL</title>
-<meta name="description" content="A workspace where people and AI agents work together. A guard that cannot be switched off checks every action before it runs.">
+<meta name="description" content="A workspace where people and AI agents work together. A guard that cannot be switched off checks each tool call an agent makes, before it runs.">
 <meta property="og:title" content="UNVEIL">
-<meta property="og:description" content="A workspace where people and AI agents work together. A guard that cannot be switched off checks every action before it runs.">
+<meta property="og:description" content="A workspace where people and AI agents work together. A guard that cannot be switched off checks each tool call an agent makes, before it runs.">
 <meta property="og:type" content="website">
 <meta name="theme-color" content="#04060b">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@600&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
@@ -188,7 +188,7 @@ footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted
     <span class="status" aria-hidden="true"><i></i></span>
     <h1>UNVEIL</h1>
   </div>
-  <p class="lede">A workspace where people and AI agents work together. A guard that cannot be switched off checks every action before it runs.</p>
+  <p class="lede">A workspace where people and AI agents work together. A guard that cannot be switched off checks each tool call an agent makes, before it runs.</p>
   <div class="hint label">Scroll to follow the action</div>
 </header>
 
@@ -206,21 +206,21 @@ footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted
       <div class="card">
         <div class="label"><b>Check 1</b> · the request</div>
         <h2>Does it match what you asked for?</h2>
-        <p>The app compares the action with the task you gave. An agent that reaches for something outside the task is refused here.</p>
+        <p>The app compares the action with what your request allows, by kind of tool and by the files and places it may use. Anything outside that is refused here.</p>
       </div>
     </article>
     <article class="step" data-step="2">
       <div class="card">
         <div class="label"><b>Check 2</b> · you</div>
         <h2>You say yes or no</h2>
-        <p>Actions that touch your files, your accounts or the outside world wait for your approval. You can allow once, allow for the session, or deny.</p>
+        <p>After an agent reads outside content, like a web page or an email, an action that changes files, reads private data, runs code or reaches the outside world waits for your approval. You can allow it for this task, allow it for this chat, or deny it.</p>
       </div>
     </article>
     <article class="step guard" data-step="3">
       <div class="card">
         <div class="label"><b>Check 3</b> · UNVEIL guard</div>
         <h2>The guard checks last, even after a yes</h2>
-        <p>Before anything runs, the guard looks at the action itself for signs of misuse or malware. If it finds them, the action is blocked, whatever was approved before it.</p>
+        <p>Before anything runs, the guard reads the action itself against fixed rules for misuse, such as a change to UNVEIL itself or credentials being sent out. A match blocks the action, whatever was approved before it.</p>
         <p>The guard can only say no. It has no off switch.</p>
       </div>
     </article>
@@ -228,7 +228,7 @@ footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted
       <div class="card">
         <div class="label"><b>Always on</b> · background watch</div>
         <h2>It keeps watching when you are away</h2>
-        <p>The guard re-checks the workspace every 60 seconds, with or without anyone signed in, and every decision is written to a signed record.</p>
+        <p>Every 60 seconds, with or without anyone signed in, a watch checks that the guard's files, its place in the app and its record are unchanged. If not, agent tool calls stop until an administrator clears it.</p>
       </div>
     </article>
     <article class="step open" data-step="5">
@@ -247,12 +247,12 @@ footer .meta { display: flex; flex-wrap: wrap; gap: 8px 28px; color: var(--muted
   <div class="wrap">
     <div class="label">Why we built it</div>
     <h2>Agents can act on their own now. The safety around them should not be optional.</h2>
-    <p>AI agents read files, browse the web and run commands without a person typing each step. On most platforms the protection around that is a settings page, and settings get turned off.</p>
-    <p>UNVEIL puts the protection in the core. The aim is a place where people and agents work together, not against each other, with human judgment as the final authority.</p>
+    <p>Protection for agents is often left as an optional setting.</p>
+    <p>UNVEIL puts the protection in the core. The aim is a place where people and agents work together, not against each other, with people, not agents, holding the authority.</p>
     <ul class="principles">
-      <li><strong>Human authority</strong><span>No agent can change the app, change logins, or act without a person authorizing it.</span></li>
+      <li><strong>Human authority</strong><span>The guard refuses an agent's change to the app's code, the logins or the guard itself. A settings change needs a person to approve that exact action.</span></li>
       <li><strong>Always enforced</strong><span>The guard has one mode. There is no observe-only setting and no way to turn blocking off.</span></li>
-      <li><strong>On the record</strong><span>Every decision the guard makes, allowed or blocked, is written to a signed record.</span></li>
+      <li><strong>On the record</strong><span>Each tool call decision, allowed or blocked, and each text the guard refuses is written to a signed record.</span></li>
     </ul>
   </div>
 </section>
