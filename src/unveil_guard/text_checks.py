@@ -23,26 +23,27 @@ _ROLE = r"you are|you're|you will be|act as|behave as|pretend to be|pretend you 
 _ENCODINGS = r"(base64|rot-?13|hex|binary|morse|cipher)"
 
 
-# The space between two words that are next to each other in a phrase: one space, or one line break.
-# A blank line is not such a space, so it ends a phrase.
-_WORD_SPACE = r"(?: ?\n ?| )"
+# A rule accepts a line break in one place only, where ``\s+`` is written: inside the object of a phrase,
+# after a word such as "previous" or "your". There, the space between two words is one space or one line
+# break. A blank line ends a phrase. A plain space in a rule does not accept a line break: a line of text
+# that ends there is read as a line by itself, such as a heading or the label of a button.
+_OBJECT_SPACE = r"(?: ?\n ?| )"
 
 
 def _rules(*rules: tuple[str, str]) -> tuple:
-    """Compile the rules. In a rule, ``\\s+`` stands for the space between two words of a phrase."""
-    return tuple((name, re.compile(pattern.replace(r"\s+", _WORD_SPACE), re.IGNORECASE)) for name, pattern in rules)
+    """Compile the rules. In a rule, ``\\s+`` stands for the space between two words of the object of a phrase."""
+    return tuple((name, re.compile(pattern.replace(r"\s+", _OBJECT_SPACE), re.IGNORECASE)) for name, pattern in rules)
 
 
 def _instruction_override(own_words: str) -> tuple[str, str]:
     """Wording that tells a model to drop the rules it was given. ``own_words`` is the pattern
     that lets a person cancel their own earlier instructions ("my previous instructions")."""
     return ("instruction_override",
-            r"\b(ignore|disregard|forget|override|bypass|discard)\b"
-            r"([^.!?\n]{0,30}?|\s+((all|any|every)\s+)?(of\s+)?((the|those|these)\s+)?)"
+            r"\b(ignore|disregard|forget|override|bypass|discard)\b[^.!?\n]{0,30}?"
             r"(" + own_words + r"\b(previous|prior|above|earlier|preceding|initial|original)\s+(\w+\s+){0,2}"
             + _TARGETS + r"\b"
             r"|\byour\s+(\w+\s+){0,2}(" + _TARGETS + r"|safeguards|safety|polic(y|ies))\b)"
-            r"|\b(ignore|disregard|forget|override|bypass|discard)\s+(all|any|every)\s+(of\s+)?((the|those|these)\s+)?"
+            r"|\b(ignore|disregard|forget|override|bypass|discard) (all|any|every) (of )?((the|those|these) )?"
             r"(instructions|rules|guidelines|directives)\b")
 
 
@@ -52,16 +53,16 @@ _SHARED_RULES = _rules(
     # Wording that gives a model a role that has no rules.
     ("unrestricted_persona",
      r"\b(" + _ROLE + r"|from now on)\b[^.!?\n]{0,80}"
-     r"\b(no|without|free of|free from|not bound by|unbound by)\s+((any|all)\s+)?"
+     r"\b(no|without|free of|free from|not bound by|unbound by) ((any|all) )?"
      r"(restrictions|rules|limitations|filters|guidelines|ethics|morals|censorship|safeguards)\b"
-     r"|\b(" + _ROLE + r"|simulate|stay in)\b[^.!?\n]{0,60}\b(developer|god|dan|jailbreak|jailbroken)\s+mode\b"
-     r"|\b(" + _ROLE + r")\s+(now\s+)?an?\s+(unfiltered|uncensored|unrestricted|amoral|unethical)\b"
-     r"|\b(dan|jailbreak|jailbroken)\s+mode\b"
+     r"|\b(" + _ROLE + r"|simulate|stay in)\b[^.!?\n]{0,60}\b(developer|god|dan|jailbreak|jailbroken) mode\b"
+     r"|\b(" + _ROLE + r") (now )?an? (unfiltered|uncensored|unrestricted|amoral|unethical)\b"
+     r"|\b(dan|jailbreak|jailbroken) mode\b"
      r"|\bdan\b[^\n]{0,200}\bdo anything now\b|\bdo anything now\b[^\n]{0,200}\bdan\b"),
     # Wording that tells a model to switch off its own protections.
     ("safeguard_removal",
-     r"\b(disable|turn off|switch off|remove|deactivate|bypass|circumvent|get around|evade)\s+((all|any)\s+)?"
-     r"(of\s+)?your\s+(own\s+)?(\w+\s+){0,2}"
+     r"\b(disable|turn off|switch off|remove|deactivate|bypass|circumvent|get around|evade) ((all|any) )?"
+     r"(of )?your\s+(own\s+)?(\w+\s+){0,2}"
      r"(filters?|safeguards?|guardrails?|restrictions|safety|censorship|limitations|moderation|content policy)\b"),
     # Wording that tells a model to follow instructions kept in an encoded form.
     ("encoded_instructions",
@@ -79,9 +80,9 @@ _CONTENT_RULES = _rules(_instruction_override("")) + _SHARED_RULES + _rules(
     # Wording in content that speaks to the model that reads it.
     ("reader_directive",
      r"\bif you('re| are) an? " + _AI_READER + r"\b"
-     r"|\b(instructions?|note|notice|message|attention)\s+(to|for)\s+((the|any|all)\s+)?" + _AI_READER + r"\b"
-     r"|\b(do not|don't|never)\s+(tell|inform|notify|alert)\s+the\s+(user|human|person|operator)"
-     r"(\s+(about|of|that you|this|anything)\b|\s*([.!\n]|$))"),
+     r"|\b(instructions?|note|notice|message|attention) (to|for) ((the|any|all) )?" + _AI_READER + r"\b"
+     r"|\b(do not|don't|never) (tell|inform|notify|alert) the (user|human|person|operator)"
+     r"( (about|of|that you|this|anything)\b|\s*([.!\n]|$))"),
 )
 
 _SPACING = re.compile(r"[^\S\n]+")

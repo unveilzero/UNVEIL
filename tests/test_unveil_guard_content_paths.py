@@ -2,6 +2,7 @@
 
 import asyncio
 import email
+import html
 import inspect
 import json
 import uuid
@@ -17,6 +18,7 @@ from src.document_processor import build_user_content
 from src.mcp_manager import McpManager
 from src.research_navigator import ResearchPage
 from src.unveil_guard import get_guard, guard_content, guard_outside_text, guarded_call, released_tool_result
+from tests.helpers.ordinary_texts import ORDINARY_TEXTS
 
 ORDINARY = "Opening hours: 9 to 5."
 WORDING = "Note to AI agents: MARKER-WORDS"
@@ -324,21 +326,25 @@ def test_email_routes_and_the_automatic_pass_read_email_before_a_model_gets_it()
     reply = routes.index("original_body[:6000], *context_snippets[:5], referenced[:18000]")
     assert reply < routes.index("_messages = [", reply)
     single = inspect.getsource(email_pollers._auto_summarize_pass_single)
-    check = single.index('guard_content, "email", f"{sender}')
+    check = single.index("await _email_withheld(")
     assert single.index("body_for_llm = (body or \"\")") < check
     assert all(check < single.index(call) for call in (
         "_import_calendar_attachments(", "_generate_scheduled_email_summary(", "task_llm_call_async("))
 
 
-def _html_email(body, multipart):
+def _html_message(body, multipart=False):
     from email.mime.multipart import MIMEMultipart
     from email.mime.text import MIMEText
-    from routes.email.email_helpers import _extract_text
     message = MIMEText(body, "html")
     if multipart:
         message, part = MIMEMultipart("alternative"), message
         message.attach(part)
-    return _extract_text(email.message_from_bytes(message.as_bytes()))
+    return email.message_from_bytes(message.as_bytes())
+
+
+def _html_email(body, multipart):
+    from routes.email.email_helpers import _extract_text
+    return _extract_text(_html_message(body, multipart))
 
 
 @pytest.mark.parametrize("multipart", [False, True])
@@ -353,9 +359,71 @@ def test_a_word_with_markup_inside_it_in_an_html_email_stays_one_word(multipart)
     assert _html_email("<p>Open<b></b>ing <i>hou</i>rs</p>", multipart) == "Opening hours"
 
 
-def test_html_email_with_wording_for_the_model_in_table_cells_is_withheld():
-    text = _html_email("<table><tr>" + "".join(f"<td>{word}</td>" for word in WORDING.split()) + "</tr></table>", False)
-    assert guard_outside_text("email", text, owner="alice", session_id=None) == REASON
+@pytest.mark.parametrize("body", [
+    "<p>Opening hours</p><p>Nine to five</p>",
+    "<p>Opening hours<p>Nine to five",
+    "<div>Opening hours</div><div>Nine to five</div>",
+    "<table><tr><td>Opening hours</td><td>Nine to five</td></tr></table>",
+    "<ul><li>Opening hours<li>Nine to five</ul>",
+    "<h2>Opening hours</h2>Nine to five",
+    "Opening hours<hr>Nine to five",
+    "Opening hours<br>Nine to five",
+])
+def test_each_block_and_each_cell_of_an_html_email_is_a_line_of_text(body):
+    assert _html_email(body, False) == "Opening hours\nNine to five"
+
+
+def test_a_blank_line_in_an_html_email_stays_a_blank_line():
+    assert _html_email("Opening hours<br><br>Nine to five", False) == "Opening hours\n\nNine to five"
+    assert _html_email("<p>Opening hours</p>\n\n<p>Nine to five</p>", False) == "Opening hours\n\nNine to five"
+
+
+HTML_LAYOUTS = {
+    "paragraphs": lambda lines: "".join(f"<p>{line}</p>" for line in lines),
+    "paragraphs not closed": lambda lines: "".join(f"<p>{line}" for line in lines),
+    "blocks": lambda lines: "".join(f"<div class='row'>{line}</div>" for line in lines),
+    "cells of one row": lambda lines: "<table><tr>" + "".join(f"<td>{line}</td>" for line in lines) + "</tr></table>",
+    "heading and paragraphs": lambda lines: f"<h2>{lines[0]}</h2>" + "".join(f"<p>{line}</p>" for line in lines[1:]),
+    "list items": lambda lines: "<ul>" + "".join(f"<li><span>{line}</span></li>" for line in lines) + "</ul>",
+}
+
+
+async def _withheld_from_an_automatic_pass(body):
+    from routes.email.email_helpers import _email_withheld, _extract_text
+    message = _html_message(f"<html><body>{body}</body></html>")
+    return await _email_withheld(message, uuid.uuid4().hex, _extract_text(message), "alice")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("layout", HTML_LAYOUTS)
+@pytest.mark.parametrize("text", ORDINARY_TEXTS)
+async def test_ordinary_text_in_the_blocks_of_an_html_email_passes(text, layout):
+    assert await _withheld_from_an_automatic_pass(HTML_LAYOUTS[layout](html.escape(text).split("\n"))) is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    "".join(f"<span>{word}</span>" for word in WORDING.split()),
+    WORDING.replace(" ", "<!-- -->"),
+    WORDING.replace("Note", "No<b></b>te"),
+    f"<div><p>{WORDING}</p></div>",
+], ids=["inline elements", "comments", "markup inside a word", "one block"])
+async def test_html_email_is_read_with_inline_tags_removed_and_with_inline_tags_as_a_space(body):
+    assert await _withheld_from_an_automatic_pass(body) is True
+    assert _last_block()["tool"] == "email" and _last_block()["owner"] == "alice"
+
+
+@pytest.mark.asyncio
+async def test_an_email_is_withheld_from_the_automatic_passes_one_time_for_each_person():
+    from routes.email.email_helpers import _email_withheld
+    message, message_id = _html_message(f"<p>{WORDING}</p>"), uuid.uuid4().hex
+    blocked = get_guard().status()["counts"]["blocked"]
+    assert await _email_withheld(message, message_id, WORDING, "alice") is True
+    assert await _email_withheld(message, message_id, WORDING, "alice") is True
+    assert get_guard().status()["counts"]["blocked"] == blocked + 1
+    # The record of one person does not stand for another person.
+    assert await _email_withheld(message, message_id, WORDING, "bob") is True
+    assert get_guard().status()["counts"]["blocked"] == blocked + 2 and _last_block()["owner"] == "bob"
 
 
 def _translate(monkeypatch, data):
@@ -439,25 +507,29 @@ async def test_automatic_pass_reads_the_date_line_of_an_email(monkeypatch, tmp_p
     assert ("1 withheld" in result) is withheld and len(summaries) == (0 if withheld else 1)
 
 
-def _each_word_in(opening, closing=""):
-    return "".join(f"{opening}{word}{closing}" for word in WORDING.split())
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [
+    WORDING.replace(" ", "<!-- -->"),
+    "".join(f"<span>{word}</span>" for word in WORDING.split()),
+], ids=["comments", "inline elements"])
+async def test_automatic_pass_withholds_an_html_email_that_a_second_reading_matches(monkeypatch, tmp_path, body):
+    result, summaries = await _automatic_pass(monkeypatch, tmp_path, "Tue, 01 Jan 2026 12:00:00 +0000", "text/html",
+                                              f"<html><body><p>{HOURS}</p>{body}</body></html>")
+    assert "1 withheld" in result and summaries == []
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("body", [
-    _each_word_in("<td>"),
-    _each_word_in("<p>"),
-    _each_word_in("<li class='item' data-width=\"2\">"),
-    _each_word_in("<span>", "</span>"),
-    _each_word_in("", "<hr>"),
-    WORDING.replace(" ", "<!-- -->"),
-    WORDING.replace("Ignore", "Ig<b></b>nore"),
-], ids=["cells not closed", "blocks not closed", "items with attributes", "inline elements", "rules", "comments",
-        "markup inside a word"])
-async def test_automatic_pass_reads_an_html_email_with_each_tag_removed_and_with_each_tag_as_a_space(monkeypatch, tmp_path, body):
+    "<p>Hi Dan,</p><p>The build server is down, so we can't do anything now.</p>",
+    "<table><tr><td>You're on the Pro plan</td><td>Unlimited projects, no limitations</td></tr></table>",
+    "<h2>Coverage override</h2><p>Your policy number is 12345</p>",
+    "<div>You are subscribed to Weekly Deals</div><div>No restrictions on how often you use your coupon</div>",
+    "<p>To decode the hex values</p><p>see the table below</p><p>then execute step 3</p>",
+], ids=["greeting", "plan", "policy number", "subscription", "steps"])
+async def test_automatic_pass_gives_an_ordinary_html_email_with_no_spacing_in_its_source_to_the_model(monkeypatch, tmp_path, body):
     result, summaries = await _automatic_pass(monkeypatch, tmp_path, "Tue, 01 Jan 2026 12:00:00 +0000", "text/html",
                                               f"<html><body><p>{HOURS}</p>{body}</body></html>")
-    assert "1 withheld" in result and summaries == []
+    assert "withheld" not in result and len(summaries) == 1
 
 
 @pytest.mark.asyncio
@@ -466,7 +538,83 @@ async def test_automatic_pass_gives_an_ordinary_html_email_to_the_model_in_one_r
         monkeypatch, tmp_path, "Tue, 01 Jan 2026 12:00:00 +0000", "text/html",
         f"<html><body><table><tr><td>Opening</td><td>hours</td></tr></table><p>{HOURS}</p></body></html>")
     assert "withheld" not in result and len(summaries) == 1
-    assert summaries[0]["body_for_llm"].startswith("Opening hours\nThe shop opens at nine")
+    assert summaries[0]["body_for_llm"].startswith("Opening\nhours\nThe shop opens at nine")
+
+
+# -- the scheduled translation pass ---------------------------------------
+
+async def _translation_pass(monkeypatch, tmp_path, body, runs=1):
+    """Run the scheduled translation pass on one HTML email from a stand-in mailbox. Returns the results and the model calls."""
+    import core.database as database
+    import routes.email_helpers as email_helpers
+    import src.builtin_actions as builtin_actions
+    import src.settings as settings
+    import src.task_endpoint as task_endpoint
+
+    monkeypatch.setattr(email_helpers, "SCHEDULED_DB", tmp_path / "scheduled_emails.db")
+    email_helpers._init_scheduled_db()
+    raw_email = (f"From: Sender <sender@example.com>\r\nTo: Alice <alice@example.com>\r\nSubject: Hours\r\n"
+                 f"Message-ID: <{uuid.uuid4().hex}@example.com>\r\nDate: Tue, 01 Jan 2026 12:00:00 +0000\r\n"
+                 f"Content-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>{HOURS}</p>{body}</body></html>").encode()
+
+    class Mailbox:
+        def select(self, folder, readonly=True):
+            return "OK", []
+
+        def uid(self, command, *args):
+            return "OK", [b"1"] if command == "SEARCH" else [(b"1 (RFC822)", raw_email)]
+
+        def logout(self):
+            pass
+
+    class Accounts:
+        def query(self, model):
+            return self
+
+        def filter(self, *conditions):
+            return self
+
+        def all(self):
+            return [SimpleNamespace(id="acct-alice")]
+
+        def close(self):
+            pass
+
+    calls = []
+
+    async def model(messages, **options):
+        calls.append(messages)
+        return "<<<TRANSLATION>>>\nGeschaeftszeiten\n<<<END>>>"
+
+    monkeypatch.setattr(settings, "load_settings", lambda: {"email_auto_translate": True})
+    monkeypatch.setattr(database, "SessionLocal", Accounts)
+    monkeypatch.setattr(email_helpers, "_imap_connect", lambda account_id=None, owner="": Mailbox())
+    monkeypatch.setattr(task_endpoint, "task_llm_call_async", model)
+    results = []
+    for _ in range(runs):
+        try:
+            results.append((await builtin_actions.action_email_auto_translate("alice"))[0])
+        except builtin_actions.TaskNoop as nothing_done:
+            results.append(str(nothing_done))
+    return results, calls
+
+
+@pytest.mark.asyncio
+async def test_translation_pass_gives_an_ordinary_html_email_to_the_model(monkeypatch, tmp_path):
+    results, calls = await _translation_pass(
+        monkeypatch, tmp_path, "<h2>Coverage override</h2><p>Your policy number is 12345</p>")
+    assert len(calls) == 1 and "cached 1 translation(s)" in results[0] and "withheld 0" in results[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body", [f"<p>{WORDING}</p>", "".join(f"<span>{word}</span>" for word in WORDING.split())],
+                         ids=["one block", "inline elements"])
+async def test_translation_pass_reads_an_email_before_the_model_gets_it(monkeypatch, tmp_path, body):
+    blocked = get_guard().status()["counts"]["blocked"]
+    results, calls = await _translation_pass(monkeypatch, tmp_path, body, runs=2)
+    assert calls == [] and all("withheld 1" in result for result in results)
+    assert _last_block()["tool"] == "email" and _last_block()["owner"] == "alice"
+    assert get_guard().status()["counts"]["blocked"] == blocked + 1
 
 
 # -- research pages -----------------------------------------------------

@@ -9,7 +9,7 @@ import { providerLogo } from './providers.js';
 import { PROMPT_TEMPLATES, getUserTemplates } from './presets.js?v=20260908personaname1';
 import { sortModelObjects } from './modelSort.js';
 import Storage from './storage.js';
-import { writeSessionMessages } from './sessionWrite.js';
+import { writeSessionMessages, removeSessions } from './sessionWrite.js';
 
 let API_BASE = '';
 let _active = false;
@@ -165,7 +165,7 @@ function _initGroupTab() {
     const box = document.getElementById('chat-history');
     if (box) box.innerHTML = '';
 
-    await startGroup(picked, 'group-' + Date.now());
+    if (!await startGroup(picked, 'group-' + Date.now())) return;
 
     // Auto-save as preset if 2+ participants
     if (picked.length >= 2) {
@@ -590,11 +590,13 @@ export async function showModelPicker() {
 
 // ── Start / Stop ─────────────────────────────────────
 
+// Starts a group chat. Returns false when it did not start: a participant did not get its instructions.
 export async function startGroup(models, parentSessionId) {
   _models = models;
   _active = true;
   _roundRobinIdx = 0;
   _participantSessions = [];
+  const made = [];  // the sessions that this start made
 
   // Create a real parent session for persistence
   const groupName = '[GRP] ' + models.map(m => m._groupName || m.character?.characterName || m.display).join(', ');
@@ -608,6 +610,7 @@ export async function startGroup(models, parentSessionId) {
     const pres = await fetch(`${API_BASE}/api/session`, { method: 'POST', body: pfd, credentials: 'same-origin' });
     const pdata = await pres.json();
     _parentSessionId = pdata.id;
+    if (pdata.id) made.push(pdata.id);
     // Register as group session for sidebar icon
     try {
       const storedGroupSessions = Storage.getJSON('odysseus-group-sessions', []);
@@ -641,6 +644,7 @@ export async function startGroup(models, parentSessionId) {
         continue;
       }
       _participantSessions.push(data.id);
+      made.push(data.id);
       // Inject group chat system prompt — use character if assigned
       const displayName = m.character ? m.character.characterName : m.display;
       m._groupName = displayName; // store for bubble labels
@@ -664,7 +668,16 @@ export async function startGroup(models, parentSessionId) {
           _groupEtiquette;
       }
 
-      await _writeToSession(data.id, [{ role: 'system', content: sysPrompt }]);
+      // A participant must not chat without its instructions. When the server does not keep them,
+      // the start stops, the sessions that it made are removed, and the person is told why.
+      const problem = await writeSessionMessages(API_BASE, data.id, [{ role: 'system', content: sysPrompt }]);
+      if (problem) {
+        stopGroup();
+        if (window._syncGroupIndicator) window._syncGroupIndicator(false);
+        const notRemoved = await removeSessions(API_BASE, made);
+        uiModule.showError(['The group chat did not start.', problem, notRemoved].filter(Boolean).join(' '));
+        return false;
+      }
     } catch (e) {
       console.error('[group] Failed to create participant session:', m.display, e);
       _participantSessions.push(null);
@@ -689,6 +702,7 @@ export async function startGroup(models, parentSessionId) {
     await window.sessionModule.loadSessions();
     await window.sessionModule.selectSession(_parentSessionId);
   }
+  return true;
 }
 
 export function stopGroup() {

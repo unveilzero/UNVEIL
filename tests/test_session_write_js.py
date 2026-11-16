@@ -55,3 +55,31 @@ def test_write_that_failed_with_no_reason_gives_the_status(fetch_js):
 def test_write_that_did_not_reach_the_server_gives_the_error():
     out = _write("throw new Error('offline');")
     assert out["problem"] == "These messages were not saved to the chat: offline"
+
+
+def _remove(fetch_js, ids):
+    """Run the removal helper with a stand-in for fetch. Returns what the helper returned and the requests it made."""
+    js = (
+        f"import {{ removeSessions }} from '{_HELPER.as_posix()}';"
+        "const requests = [];"
+        f"globalThis.fetch = async (url, options) => {{ requests.push(options.method + ' ' + url); {fetch_js} }};"
+        f"const problem = await removeSessions('/base', {json.dumps(ids)});"
+        "console.log(JSON.stringify({ problem, requests }));"
+    )
+    proc = subprocess.run(["node", "--input-type=module"], input=js, capture_output=True, text=True, cwd=str(_REPO), timeout=30)
+    assert proc.returncode == 0, proc.stderr
+    return json.loads(proc.stdout.strip())
+
+
+def test_removed_sessions_give_nothing_to_show():
+    out = _remove("return { ok: true, status: 200 };", ["abc", "def"])
+    assert out == {"problem": "", "requests": ["DELETE /base/api/session/abc", "DELETE /base/api/session/def"]}
+
+
+@pytest.mark.parametrize("fetch_js, reason", [
+    ("return { ok: !url.endsWith('def'), status: 500 };", "HTTP 500"),
+    ("if (url.endsWith('def')) throw new Error('offline'); return { ok: true, status: 200 };", "offline"),
+])
+def test_session_that_was_not_removed_gives_the_count_and_the_reason(fetch_js, reason):
+    out = _remove(fetch_js, ["abc", "def"])
+    assert out["problem"] == f"1 unfinished chat(s) could not be removed ({reason})." and len(out["requests"]) == 2

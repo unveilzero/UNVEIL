@@ -489,17 +489,14 @@ def _require_checkable_size(text: str) -> None:
         })
 
 
-async def _enforce_message_guard(message: Optional[str], *, owner, session_id) -> None:
+async def _enforce_message_guard(message: str, *, owner, session_id) -> None:
     """Apply the UNVEIL guard's text checks to a person's message. Both
     /api/chat and /api/chat_stream must call this BEFORE any LLM work.
     The check runs on a worker thread, and the size limit keeps its longest step short.
-    A send with attachments only has no message text, and so nothing to read here.
 
     Raises HTTPException(403) if the guard refuses the message, or
     HTTPException(413) if the message is too long to read.
     """
-    if message is None:
-        return
     _require_checkable_size(message)
     refusal = await asyncio.to_thread(guard_message, message, owner=owner, session_id=session_id)
     if refusal:

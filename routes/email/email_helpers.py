@@ -12,6 +12,7 @@ and `email_pollers.py` (the background loops):
     - Pydantic models, shared constants, scheduled-DB bootstrap
 """
 
+import asyncio
 import os
 import base64
 import time
@@ -38,6 +39,7 @@ from typing import Optional, List
 
 from src.auth_helpers import _auth_disabled, get_current_user
 from src.secret_storage import decrypt as _decrypt
+from src.unveil_guard import guard_content
 from src.url_safety import OutboundAddressBlocked, connect_outbound_tcp
 
 logger = logging.getLogger(__name__)
@@ -1789,14 +1791,20 @@ def _extract_html(msg):
 
 
 _HTML_TAG = re.compile(r"<[^>]+>")
+# Tags that start or end a line of text, when one or more of them are next to each other.
+_HTML_LINE_TAGS = re.compile(
+    r"(?:</?(?:address|article|aside|blockquote|caption|center|dd|div|dl|dt|fieldset|figcaption|figure|footer|form"
+    r"|h[1-6]|header|hr|li|main|nav|ol|p|pre|section|table|tbody|td|tfoot|th|thead|title|tr|ul)\b[^<>]*>)+", re.I)
 
 
-def _html_to_text(raw_html: str) -> str:
-    """The text of an HTML email body. The end of a line, of a block or of a table cell separates words."""
+def _html_to_text(raw_html: str, inline: str = "") -> str:
+    """The text of an HTML email body. Each block, each table cell and each ``<br>`` is a line of text.
+
+    Each other tag becomes ``inline``: nothing in the text that a model gets, and a space in the
+    second reading that the text check makes.
+    """
     text = re.sub(r"<br\s*/?>", "\n", raw_html, flags=re.I)
-    text = re.sub(r"</(?:p|div|li|tr|h[1-6])\s*>", "\n", text, flags=re.I)
-    text = re.sub(r"</t[dh]\s*>", " ", text, flags=re.I)
-    text = html.unescape(_HTML_TAG.sub("", text))
+    text = html.unescape(_HTML_TAG.sub(inline, _HTML_LINE_TAGS.sub("\n", text)))
     text = re.sub(r"[ \t]+\n", "\n", text)
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
@@ -1826,13 +1834,25 @@ def _extract_text(msg):
     return text if msg.is_multipart() else text.strip()
 
 
-def _html_readings_for_check(msg) -> list[str]:
-    """Two more readings of each HTML body, for the text check only: each tag removed, and each tag as a space.
+# Emails that the UNVEIL security layer withheld, as (owner, message id), so a
+# later pass does not read and record the same email again.
+_guard_withheld: set = set()
 
-    Markup can join or split words in a way that the one reading from ``_extract_text`` does not show.
+
+async def _email_withheld(msg, message_id: str, text: str, owner: str) -> bool:
+    """True when the UNVEIL security layer withholds an email from the model of an automatic pass.
+
+    ``text`` is what the model gets of the email. Markup inside a line can join or split words in a way
+    that this one reading does not show. So the check also reads each HTML body a second time, with a
+    space in place of each tag inside a line.
     """
-    return [html.unescape(_HTML_TAG.sub(joiner, body))
-            for is_html, body in _text_bodies(msg) if is_html for joiner in ("", " ")]
+    key = (owner, message_id)
+    if key not in _guard_withheld and await asyncio.to_thread(
+            guard_content, "email",
+            text + "".join(f"\n\n{_html_to_text(body, ' ')}" for is_html, body in _text_bodies(msg) if is_html),
+            owner=owner or None, session_id=None):
+        _guard_withheld.add(key)
+    return key in _guard_withheld
 
 
 def _fetch_sender_thread_context(sender_addr: str,

@@ -1208,6 +1208,7 @@ async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
             SCHEDULED_DB,
             _decode_header,
             _email_cache_owner_clause,
+            _email_withheld,
             _extract_reply,
             _extract_text,
             _imap_connect,
@@ -1350,6 +1351,7 @@ async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
         translated = 0
         same_language = 0
         skipped = 0
+        withheld = 0
         failures = 0
         processed = 0
 
@@ -1389,6 +1391,12 @@ async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
                     body_hash = email_translation_body_hash(body)
                     if _cached(body_hash):
                         cached += 1
+                        continue
+                    # UNVEIL security layer: the email is read before the model gets it.
+                    if await _email_withheld(
+                            msg, msg.get("Message-ID", "").strip() or f"{acct.id}/INBOX/{uid}",
+                            f"{sender}\n{subject}\n{body}", owner or ""):
+                        withheld += 1
                         continue
                     translation, is_same_language = await _translate(body, subject, sender)
                     if is_same_language:
@@ -1433,14 +1441,16 @@ async def action_email_auto_translate(owner: str, **kwargs) -> Tuple[str, bool]:
         if translated == 0 and same_language == 0:
             result = (
                 f"no uncached foreign-language emails found "
-                f"(examined {examined}, cached {cached}, skipped {skipped}, failures {failures})"
+                f"(examined {examined}, cached {cached}, skipped {skipped}, "
+                f"withheld {withheld} by the UNVEIL security layer, failures {failures})"
             )
             if failures:
                 return f"Email Auto Translate failed: {result}", False
             raise TaskNoop(result)
         return (
             f"Email Auto Translate cached {translated} translation(s), marked {same_language} same-language "
-            f"(examined {examined}, already cached {cached}, skipped {skipped}, failures {failures})",
+            f"(examined {examined}, already cached {cached}, skipped {skipped}, "
+            f"withheld {withheld} by the UNVEIL security layer, failures {failures})",
             True,
         )
     except TaskNoop:

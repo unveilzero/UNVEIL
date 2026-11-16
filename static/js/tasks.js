@@ -16,7 +16,7 @@ import {
   unbindExpandedCardDismiss,
 } from './escMenuStack.js';
 import { getSettings, invalidateSettings } from './appConfig.js';
-import { writeSessionMessages } from './sessionWrite.js';
+import { writeSessionMessages, removeSessions } from './sessionWrite.js';
 import { orderActionMenuItems, actionMenuRank, SELECT_MENU_ICON } from './actionMenuOrder.js';
 
 const API_BASE = window.location.origin;
@@ -2714,7 +2714,11 @@ async function _openResultInChat(entry) {
       { role: 'user', content: `Here is the latest run of my scheduled task "${entry.taskName}". Let's review it.` },
       { role: 'assistant', content: entry.result || '(no output)' },
     ]);
-    if (problem) { uiModule.showError(problem); return; }
+    if (problem) {
+      // The chat that was made for this result has no use without it.
+      uiModule.showError([problem, await removeSessions(API_BASE, [sid])].filter(Boolean).join(' '));
+      return;
+    }
 
     closeTasks();
     if (window.sessionModule) {
