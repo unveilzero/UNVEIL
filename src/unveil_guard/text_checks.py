@@ -7,13 +7,22 @@ with the rules for content. Only a message can cancel the person's own
 earlier instructions. The rules are fixed in this file and use no model, so
 they run the same with or without one.
 
-Each text is read in two forms. The plain form removes accents, invisible
-characters and extra spacing. The folded form also turns look-alike digits,
-symbols and letters into the plain letters they stand for.
+Each text is read in several forms. The plain form removes accents, characters
+with no shape and extra spacing. The folded form also turns look-alike digits,
+symbols and letters into the plain letters they stand for. A text with
+character references, with characters with no shape, or with letters written
+one at a time is read in one more form for each of them.
+
+Text that the characters of a text carry is read as well: text in tag
+characters, in variation selectors and in base64. A person does not see that
+text when the content is shown, so it is read with the rules for content.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
+import html
 import re
 import unicodedata
 from typing import NamedTuple, Optional
@@ -36,7 +45,12 @@ def _instruction_override(own_words: str) -> tuple[str, str]:
             + _TARGETS + r"\b"
             r"|\byour\s+(\w+\s+){0,2}(" + _TARGETS + r"|safeguards|safety|polic(y|ies))\b)"
             r"|\b(ignore|disregard|forget|override|bypass|discard)\s+(all|any|every)\s+(of\s+)?((the|those|these)\s+)?"
-            r"(instructions|rules|guidelines|directives)\b")
+            r"(instructions|rules|guidelines|directives)\b"
+            # The same wording in Spanish, French, German and Chinese.
+            r"|\bignora\s+(todas\s+)?las\s+instrucciones\s+(anteriores|previas)\b"
+            r"|\bignore[zr]?\s+(toutes\s+)?les\s+instructions\s+precedentes\b"
+            r"|\bignoriere\s+(alle\s+)?(vorherigen|bisherigen)\s+anweisungen\b"
+            r"|忽略(之前|以上|所有|先前)的?(指令|指示|说明|提示)")
 
 
 # The rules that read a person's message and outside content in the same way.
@@ -83,6 +97,11 @@ _LOOK_ALIKES = str.maketrans({
     "0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s",
     "а": "a", "е": "e", "о": "o", "р": "p", "с": "c", "і": "i", "у": "y", "х": "x",
 })
+_SINGLE_LETTERS = re.compile(r"\b([a-z] ){3,}[a-z]\b")
+_TAG_RUN = re.compile("[\U000E0020-\U000E007E]+")
+_SELECTOR_RUN = re.compile("[\uFE00-\uFE0F\U000E0100-\U000E01EF]{3,}")  # ordinary text has one selector after a character
+_BASE64_RUN = re.compile(r"[A-Za-z0-9+/]{40,}={0,2}")
+_UNSEEN_RUN = 8  # a run of this many characters with no shape has the rule ``unseen_text``
 
 
 class Finding(NamedTuple):
@@ -90,17 +109,66 @@ class Finding(NamedTuple):
     excerpt: str  # the matched wording with a little of the text around it, for the person
 
 
-def _plain(text: str) -> str:
-    kept = (ch for ch in unicodedata.normalize("NFKD", text) if unicodedata.category(ch) not in ("Mn", "Cf"))
-    return _SPACING.sub(" ", "".join(kept))
+def _forms(text: str) -> tuple[str, ...]:
+    """The forms that ``text`` is read in. The plain form and the folded form come first."""
+    forms: list[str] = []
+    for source in dict.fromkeys((text, html.unescape(text))):
+        base = unicodedata.normalize("NFKD", source)
+        kinds = {ord(ch): unicodedata.category(ch) for ch in set(base)}
+        marks = dict.fromkeys((point for point, kind in kinds.items() if kind == "Mn"))
+        shapeless = [point for point, kind in kinds.items() if kind == "Cf"]
+        for fill in (None, " ") if shapeless else (None,):  # a character with no shape is read as nothing, and as a space
+            plain = _SPACING.sub(" ", base.translate(marks | dict.fromkeys(shapeless, fill)))
+            lowered = plain.lower()
+            for lower in dict.fromkeys((lowered, lowered.replace("1", "l"))):  # the digit 1 is read as i, and as l
+                folded = lower.translate(_LOOK_ALIKES)
+                forms += [plain, folded, _SINGLE_LETTERS.sub(lambda run: run.group().replace(" ", ""), folded)]
+    return tuple(dict.fromkeys(forms))
 
 
-def find_rule(text: str, *, content: bool = False) -> Optional[Finding]:
-    """Return the first rule that ``text`` matches, or ``None``."""
-    plain = _plain(text)
-    for form in (plain, plain.lower().translate(_LOOK_ALIKES)):
-        for name, pattern in (_CONTENT_RULES if content else _RULES):
+def _selector_byte(selector: str) -> int:
+    """The byte that one variation selector can carry."""
+    point = ord(selector)
+    return point - 0xFE00 if point <= 0xFE0F else point - 0xE0100 + 16
+
+
+def _carried(text: str) -> list[tuple[str, bool]]:
+    """Each text that the characters of ``text`` carry, and if its characters have no shape."""
+    carried = [("".join(chr(ord(tag) - 0xE0000) for tag in run), True) for run in _TAG_RUN.findall(text)]
+    for run in _SELECTOR_RUN.findall(text):
+        codes = map(_selector_byte, run)
+        carried.append(("".join(chr(code) if 32 <= code < 127 else " " for code in codes), True))
+    for run in _BASE64_RUN.findall(text):
+        try:
+            decoded = base64.b64decode(run + "=" * (-len(run) % 4), validate=True).decode("ascii")
+        except (binascii.Error, UnicodeDecodeError):
+            continue  # the run is not text in base64, so it carries no text
+        if " " in decoded and decoded.isprintable():
+            carried.append((decoded, False))
+    return carried
+
+
+def _first(text: str, rules: tuple) -> Optional[Finding]:
+    for form in _forms(text):
+        for name, pattern in rules:
             match = pattern.search(form)
             if match:
                 return Finding(name, form[max(0, match.start() - 60):match.end() + 60].strip())
     return None
+
+
+def find_rule(text: str, *, content: bool = False) -> Optional[Finding]:
+    """Return the first rule that ``text`` matches, or ``None``."""
+    finding = _first(text, _CONTENT_RULES if content else _RULES)
+    if finding:
+        return finding
+    carried = _carried(text)
+    carried += [inner for part, _ in carried for inner in _carried(part)]
+    for part, _ in carried:  # carried text is not the person's own wording
+        finding = _first(part, _CONTENT_RULES)
+        if finding:
+            return finding
+    unseen = next((part for part, shapeless in carried if shapeless and len(part) >= _UNSEEN_RUN), None)
+    if unseen is None:
+        return None
+    return Finding("unseen_text", unseen.strip()[:120] or f"{len(unseen)} characters with no shape")
